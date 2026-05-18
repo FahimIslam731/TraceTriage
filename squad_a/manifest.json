@@ -1,0 +1,49 @@
+{
+  "schema_version": "1.0",
+  "seed": 42,
+  "source_file": "/mnt/user-data/uploads/consolidated_labels.csv",
+  "source_sha256": "fa6cba9d98cc729d4aeda949f0f4eb7270b6d46c2682eaf22ab396dfb194f05e",
+  "total_rows": 638,
+  "splits": {
+    "train": {
+      "file": "train.csv",
+      "sha256": "5e7eb0e637d4b796296c701755968df2e747f477dfc8322a2bfd20d987cfcf04",
+      "rows": 510,
+      "pct": 79.94,
+      "label_counts": {
+        "REPLAN": 219,
+        "RETRIEVE_MORE": 162,
+        "TOOL_FIX": 96,
+        "RETRY": 21,
+        "LOCAL_REPAIR": 11,
+        "ESCALATE": 1
+      }
+    },
+    "dev": {
+      "file": "dev.csv",
+      "sha256": "b38ce279d9da76315467ee02112ae7fe196d349aee99a0416274485167976252",
+      "rows": 64,
+      "pct": 10.03,
+      "label_counts": {
+        "REPLAN": 28,
+        "RETRIEVE_MORE": 20,
+        "TOOL_FIX": 12,
+        "RETRY": 3,
+        "LOCAL_REPAIR": 1
+      }
+    },
+    "test": {
+      "file": "test.csv",
+      "sha256": "222189f0db35116e925b3d64d4e756c18181f1bcab7d1eeea10b3882d85a7e5f",
+      "rows": 64,
+      "pct": 10.03,
+      "label_counts": {
+        "REPLAN": 28,
+        "RETRIEVE_MORE": 20,
+        "TOOL_FIX": 12,
+        "RETRY": 3,
+        "LOCAL_REPAIR": 1
+      }
+    }
+  }
+}
