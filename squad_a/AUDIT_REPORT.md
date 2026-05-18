@@ -186,6 +186,8 @@ All 4 LLM systems disagreed with human majority on 133 traces (20.8%). These rep
 |------|-------------|
 | [`human_vs_llm_audit.py`](./human_vs_llm_audit.py) | Analysis script (run to reproduce all results) |
 | [`audit_results/consolidated_labels.csv`](./audit_results/consolidated_labels.csv) | All 638 traces with human labels, LLM labels, majority votes, agreement scores |
+| [`extract_disagreements.py`](./extract_disagreements.py) | Script to extract the 133 full-disagreement traces from the consolidated labels |
+| [`audit_results/full_disagreements.csv`](./audit_results/full_disagreements.csv) | The 133 traces where all 4 LLM models disagreed with the human majority label |
 
 ---
 
