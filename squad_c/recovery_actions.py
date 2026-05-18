@@ -8,9 +8,17 @@ Domain -> model mapping matches the original CausalFlow runs:
   MBPP         -> openai/gpt-oss-120b
   SealQA       -> google/gemini-3-flash-preview
   MedBrowseComp-> google/gemini-3-flash-preview
+
+Environment variables:
+  OPENROUTER_API_KEY   required for RETRY, REPLAN, RETRIEVE_MORE, TOOL_FIX
+  SERPER_API_KEY       required for RETRIEVE_MORE (web search augmentation)
 """
+import html.parser
 import json
+import os
+import re
 import time
+import urllib.request
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -26,6 +34,11 @@ _TOOL_FIX_DOMAINS = {"MBPP", "SealQA", "MedBrowseComp", "BrowseComp"}
 _MAX_STEP_CHARS = 600
 _MAX_PROBLEM_CHARS = 2000
 _MAX_ANSWER_CHARS = 600
+
+# Serper settings (paper spec: 5 extra search/open/extract steps per recovery)
+_SERPER_URL = "https://google.serper.dev/search"
+_SERPER_MAX_QUERIES = 5       # matches paper: "5 extra search/open/extract steps"
+_SERPER_RESULTS_PER_QUERY = 5 # snippets per search
 
 
 @dataclass
@@ -105,6 +118,104 @@ def _extract_tool_errors(steps: list[dict]) -> str:
                 f"Tool '{step['tool_name']}' failed.\n  Args: {args}\n  Output: {out}"
             )
     return "\n\n".join(errors) if errors else "No explicit tool errors recorded in trace."
+
+
+def _extract_prior_search_queries(steps: list[dict]) -> list[str]:
+    """Pull search queries the original agent already used."""
+    queries = []
+    for step in steps:
+        if step.get("tool_name") == "web_search":
+            try:
+                args = json.loads(step.get("tool_args_json") or "{}")
+                q = args.get("query") or args.get("q") or args.get("input", "")
+                if q and str(q).strip() not in queries:
+                    queries.append(str(q).strip())
+            except (json.JSONDecodeError, AttributeError):
+                pass
+    return queries
+
+
+class _TextExtractor(html.parser.HTMLParser):
+    """Minimal HTML-to-text extractor using stdlib only."""
+    _SKIP = frozenset(("script", "style", "nav", "footer", "header", "aside", "noscript"))
+
+    def __init__(self):
+        super().__init__()
+        self._parts: list[str] = []
+        self._depth = 0  # skip-tag nesting depth
+
+    def handle_starttag(self, tag, attrs):
+        if tag in self._SKIP:
+            self._depth += 1
+
+    def handle_endtag(self, tag):
+        if tag in self._SKIP and self._depth > 0:
+            self._depth -= 1
+
+    def handle_data(self, data):
+        if self._depth == 0:
+            text = data.strip()
+            if text:
+                self._parts.append(text)
+
+    def get_text(self) -> str:
+        return re.sub(r"\s+", " ", " ".join(self._parts)).strip()
+
+
+def _web_fetch(url: str, max_chars: int = 2000) -> str:
+    """Fetch a URL and return cleaned page text (stdlib only, no extra deps)."""
+    req = urllib.request.Request(
+        url,
+        headers={"User-Agent": "Mozilla/5.0 (compatible; TraceTriage/1.0)"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            raw = resp.read(1_000_000)  # cap at 1 MB
+            content_type = resp.headers.get("Content-Type", "")
+            charset = "utf-8"
+            if "charset=" in content_type:
+                charset = content_type.split("charset=")[-1].split(";")[0].strip()
+            page_html = raw.decode(charset, errors="replace")
+    except Exception as exc:
+        return f"[fetch failed: {exc}]"
+
+    extractor = _TextExtractor()
+    extractor.feed(page_html)
+    text = extractor.get_text()
+    return text[:max_chars] + "...[truncated]" if len(text) > max_chars else text
+
+
+def _serper_search(queries: list[str], api_key: str) -> list[dict]:
+    """Run up to _SERPER_MAX_QUERIES through Serper.
+
+    Returns a list of dicts: {query, results: [{title, snippet, url}]}
+    """
+    output = []
+    for query in queries[:_SERPER_MAX_QUERIES]:
+        payload = json.dumps({"q": query, "num": _SERPER_RESULTS_PER_QUERY}).encode()
+        req = urllib.request.Request(
+            _SERPER_URL,
+            data=payload,
+            headers={"X-API-KEY": api_key, "Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode())
+        except Exception:
+            continue
+        results = [
+            {
+                "title":   item.get("title", ""),
+                "snippet": item.get("snippet", ""),
+                "url":     item.get("link", ""),
+            }
+            for item in data.get("organic", [])[:_SERPER_RESULTS_PER_QUERY]
+            if item.get("title") or item.get("snippet")
+        ]
+        if results:
+            output.append({"query": query, "results": results})
+    return output
 
 
 def _system_prompt(domain: str) -> str:
@@ -263,11 +374,13 @@ def run_replan(trace: FailedTrace, client: OpenAI, tracker: CostTracker) -> Reco
 
 
 def run_retrieve_more(trace: FailedTrace, client: OpenAI, tracker: CostTracker) -> RecoveryResult:
-    """Allow extended retrieval reasoning before answering (SealQA, MedBrowse only).
+    """Fetch real web evidence via Serper, then answer (SealQA, MedBrowse only).
 
-    The prompt explicitly asks the model to reason through what additional
-    sources it would consult, then provide a final answer based on that extended
-    research. Full tool-call integration (Serper) can be wired in later.
+    Strategy:
+      1. Build search queries: problem statement + prior agent queries (deduplicated).
+      2. Run up to 5 searches through Serper (paper spec: 5 extra search/open/extract steps).
+      3. Feed retrieved snippets to the model to synthesize a final answer.
+    Falls back to reasoning-only if SERPER_API_KEY is not set.
     """
     if trace.domain not in _RETRIEVE_MORE_DOMAINS:
         rec = tracker.make_zero_cost_record(
@@ -283,25 +396,66 @@ def run_retrieve_more(trace: FailedTrace, client: OpenAI, tracker: CostTracker) 
         )
 
     model = _model_for(trace)
-    trace_summary = _compact_steps(trace.steps, max_steps=15)
+    serper_key = os.environ.get("SERPER_API_KEY", "")
+
+    # Build search queries: problem statement first, then prior agent queries
+    prior_queries = _extract_prior_search_queries(trace.steps)
+    primary_query = _trunc(trace.problem_statement, 200).replace("\n", " ")
+    all_queries = [primary_query] + [q for q in prior_queries if q != primary_query]
+
+    queries_run: list[str] = []
+
+    if serper_key:
+        # Step 1: Search — get results including URLs
+        search_data = _serper_search(all_queries, serper_key)
+
+        # Step 2: Fetch top URL per query (open + extract, matching paper spec)
+        evidence_parts = []
+        for entry in search_data:
+            queries_run.append(entry["query"])
+            top = entry["results"][0] if entry["results"] else None
+            snippet_lines = "\n".join(
+                f"  - {r['title']}: {r['snippet']}" for r in entry["results"]
+            )
+            section = f'Search "{entry["query"]}":\n{snippet_lines}'
+
+            if top and top["url"]:
+                page_text = _web_fetch(top["url"])
+                section += f'\n  Full page ({top["url"]}):\n  {page_text}'
+
+            evidence_parts.append(section)
+
+        evidence_section = "Web search results (search → fetch → extract):\n\n" + \
+                           "\n\n".join(evidence_parts) if evidence_parts else "No results retrieved."
+    else:
+        evidence_section = (
+            "No web search available. Reason through what additional sources "
+            "would be needed and provide your best answer from existing knowledge."
+        )
+
     user_msg = (
         f"The previous agent attempt FAILED to answer this question correctly.\n"
         f"Previous (wrong) answer: {_trunc(trace.final_answer, _MAX_ANSWER_CHARS)}\n\n"
-        "The failure appears to be due to insufficient or missing information. "
-        "Reason through what additional sources, searches, or evidence would be needed, "
-        "then provide your best final answer based on that extended research.\n\n"
         f"Problem:\n{_trunc(trace.problem_statement, _MAX_PROBLEM_CHARS)}\n\n"
-        f"What the previous agent did (steps summary):\n{trace_summary}\n\n"
-        "Based on more thorough research, what is the correct answer?"
+        f"{evidence_section}\n\n"
+        "Based on the evidence above, what is the correct answer? "
+        "Be specific and direct."
     )
     t0 = time.perf_counter()
     try:
-        answer, in_tok, out_tok = _call_model(client, model, _system_prompt(trace.domain), user_msg, temperature=0.3)
+        answer, in_tok, out_tok = _call_model(
+            client, model, _system_prompt(trace.domain), user_msg, temperature=0.3,
+        )
         latency = time.perf_counter() - t0
-        return _build_result_and_record(trace, "RETRIEVE_MORE", model, answer, in_tok, out_tok, latency, tracker)
+        return _build_result_and_record(
+            trace, "RETRIEVE_MORE", model, answer, in_tok, out_tok, latency, tracker,
+            metadata={"serper_used": bool(serper_key), "queries_run": queries_run},
+        )
     except Exception as exc:
         latency = time.perf_counter() - t0
-        return _build_result_and_record(trace, "RETRIEVE_MORE", model, "", 0, 0, latency, tracker, error=repr(exc))
+        return _build_result_and_record(
+            trace, "RETRIEVE_MORE", model, "", 0, 0, latency, tracker, error=repr(exc),
+        )
 
 
 def run_tool_fix(trace: FailedTrace, client: OpenAI, tracker: CostTracker) -> RecoveryResult:

@@ -27,7 +27,10 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
+from dotenv import load_dotenv
 from openai import OpenAI
+
+load_dotenv()  # loads OPENROUTER_API_KEY and SERPER_API_KEY from .env
 
 from .cost_tracker import CostTracker
 from .recovery_actions import FailedTrace, RecoveryResult, run_recovery

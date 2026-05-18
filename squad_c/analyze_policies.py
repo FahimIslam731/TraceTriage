@@ -19,10 +19,11 @@ always_retry          — apply RETRY to every failure
 always_local_repair   — apply LOCAL_REPAIR to every failure
 always_replan         — apply REPLAN to every failure
 always_retrieve_more  — RETRIEVE_MORE where applicable, LOCAL_REPAIR fallback
-domain_policy         — modal action per domain (computed from triage_labels)
-trace_triage          — action predicted by classifier (triage_labels.action_label)
+domain_policy         — modal action per domain (computed from Squad A labels)
+trace_triage          — action from Squad A human_majority labels (all_1212_labels.csv)
 oracle                — whichever action actually succeeded (upper bound)
 """
+import csv
 import json
 import sqlite3
 import sys
@@ -30,6 +31,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 DB_PATH = Path("data/causal_runs.sqlite")
+LABELS_CSV = Path("squad_c/all_1212_labels.csv")   # Squad A's human majority labels
 RESULTS_DIR = Path("squad_c/results")
 RESULTS_JSONL = RESULTS_DIR / "recovery_results.jsonl"
 POLICY_JSON = RESULTS_DIR / "policy_comparison.json"
@@ -74,19 +76,39 @@ def load_results(path: Path) -> dict[str, dict[str, dict]]:
     return dict(by_trace)
 
 
+def load_squad_a_labels(csv_path: Path) -> dict[str, str]:
+    """Load human majority-vote labels from Squad A's all_1212_labels.csv."""
+    if not csv_path.exists():
+        sys.exit(f"Squad A labels not found: {csv_path}")
+    with open(csv_path, encoding="utf-8") as f:
+        return {row["trace_id"]: row["human_majority"] for row in csv.DictReader(f)}
+
+
 def load_trace_metadata(db_path: Path) -> dict[str, dict]:
-    """Load domain, action_label (triage prediction) for each trace."""
+    """Load domain and action_label for each trace.
+
+    action_label comes from Squad A's all_1212_labels.csv (human majority-vote).
+    For traces not in the CSV the label is None (excluded from trace_triage evaluation).
+    """
+    squad_a_labels = load_squad_a_labels(LABELS_CSV)
+
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     rows = conn.execute("""
-        SELECT l.trace_id, t.domain, l.action_label
+        SELECT l.trace_id, t.domain
         FROM triage_labels l
         JOIN traces t ON l.trace_id = t.trace_id
         WHERE t.is_failing_trace = 1 AND t.is_ablation = 0
     """).fetchall()
     conn.close()
-    return {row["trace_id"]: {"domain": row["domain"], "action_label": row["action_label"]}
-            for row in rows}
+
+    return {
+        row["trace_id"]: {
+            "domain": row["domain"],
+            "action_label": squad_a_labels.get(row["trace_id"]),
+        }
+        for row in rows
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -94,7 +116,7 @@ def load_trace_metadata(db_path: Path) -> dict[str, dict]:
 # ---------------------------------------------------------------------------
 
 def compute_domain_modal(metadata: dict[str, dict]) -> dict[str, str]:
-    """Compute modal triage label per domain from finalized triage_labels."""
+    """Compute modal triage label per domain from Squad A labels."""
     counts: dict[str, Counter] = defaultdict(Counter)
     for info in metadata.values():
         if info["action_label"]:

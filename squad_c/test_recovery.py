@@ -512,6 +512,125 @@ class TestVerifyAnswer(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Small verbose test — 1 trace per domain, all actions, prints like traces_to_label.txt
+# ---------------------------------------------------------------------------
+
+def run_small_test():
+    """Load 1 trace per domain, run all applicable recovery actions, print everything."""
+    import os
+    import tempfile
+    from dataclasses import asdict
+    from dotenv import load_dotenv
+    from openai import OpenAI
+    from .run_recovery import load_failed_traces
+
+    load_dotenv()
+
+    api_key = os.environ.get("OPENROUTER_API_KEY")
+    if not api_key:
+        print("ERROR: set OPENROUTER_API_KEY in .env"); return
+
+    client = OpenAI(
+        api_key=api_key,
+        base_url="https://openrouter.ai/api/v1",
+        default_headers={"HTTP-Referer": "http://localhost", "X-Title": "TraceTriage-SmallTest"},
+    )
+
+    db = Path("data/causal_runs.sqlite")
+    if not db.exists():
+        print(f"ERROR: {db} not found"); return
+
+    domains = ["GSM8K", "MBPP", "SealQA", "MedBrowseComp"]
+    traces  = []
+    for domain in domains:
+        batch = load_failed_traces(db, domain_filter=[domain], limit_per_domain=1)
+        if batch:
+            traces.append(batch[0])
+        else:
+            print(f"[WARN] No trace found for {domain}")
+
+    SEP = "=" * 80
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tracker = CostTracker(Path(tmp) / "small_test_cost.jsonl")
+
+        for i, trace in enumerate(traces, 1):
+            # ── Header ──────────────────────────────────────────────────────
+            print(SEP)
+            print(f"TRACE {i} / {len(traces)}")
+            print(f"TRACE ID:  {trace.trace_id}")
+            print(f"DOMAIN:    {trace.domain} | BENCHMARK: {trace.domain}")
+            print(SEP)
+            print()
+            print("[PROBLEM STATEMENT]")
+            print(trace.problem_statement[:500])
+            print()
+            print("[GOLD ANSWER]")
+            print(trace.gold_answer)
+            print()
+            print("[AGENT FINAL ANSWER]")
+            print(str(trace.final_answer)[:300])
+            print()
+
+            # ── Original steps ───────────────────────────────────────────────
+            print(SEP)
+            print("AGENT EXECUTION STEPS")
+            print(SEP)
+            for step in trace.steps:
+                stype = step.get("step_type", "").upper()
+                tool  = step.get("tool_name", "")
+                print(f"\n--- STEP {step.get('step_index')} : {stype} ---")
+                if tool:
+                    print(f"Tool Used: {tool}")
+                if step.get("tool_args_json"):
+                    print(f"Args: {str(step['tool_args_json'])[:200]}")
+                if step.get("tool_output_json"):
+                    print(f"Output: {str(step['tool_output_json'])[:300]}")
+                if step.get("text") and not tool:
+                    print(f"Text: {str(step['text'])[:300]}")
+            print()
+
+            # ── Recovery actions ─────────────────────────────────────────────
+            print(SEP)
+            print(f"RECOVERY ACTIONS  (applicable: {', '.join(trace.applicable_actions)})")
+            print(SEP)
+
+            for action in trace.applicable_actions:
+                print(f"\n--- ACTION: {action} ---")
+                try:
+                    needs_client = action in ("RETRY", "REPLAN", "RETRIEVE_MORE", "TOOL_FIX")
+                    result = run_recovery(trace, action, tracker, client if needs_client else None)
+                    print(f"SUCCESS:  {result.success}")
+                    print(f"ANSWER:   {str(result.recovered_answer or '')[:300]}")
+                    print(f"COST:     ${result.cost_usd:.6f}")
+                    print(f"TOKENS:   {result.total_tokens} (in={result.input_tokens} out={result.output_tokens})")
+                    print(f"LATENCY:  {result.latency_seconds:.2f}s")
+                    if result.error:
+                        print(f"ERROR:    {result.error}")
+                    if result.metadata:
+                        print(f"METADATA: {result.metadata}")
+                except Exception as exc:
+                    print(f"  [EXCEPTION] {exc}")
+
+            print()
+
+        # ── Summary ─────────────────────────────────────────────────────────
+        summary = tracker.session_summary()
+        print(SEP)
+        print("SESSION SUMMARY")
+        print(SEP)
+        print(f"Total calls:    {summary.get('total_calls', 0)}")
+        print(f"Total cost:     ${summary.get('total_cost_usd', 0):.4f}")
+        print(f"Total tokens:   {summary.get('total_tokens', 0)}")
+        print(f"Success rate:   {summary.get('success_rate', 0):.1%}")
+        print()
+        print("By action:")
+        for action, stats in summary.get("by_action", {}).items():
+            rate = stats["successes"] / stats["calls"] if stats["calls"] else 0
+            print(f"  {action:<15} calls={stats['calls']}  success={rate:.0%}  cost=${stats['cost_usd']:.4f}")
+
+
+# ---------------------------------------------------------------------------
 # Live integration test (optional, needs OPENROUTER_API_KEY)
 # ---------------------------------------------------------------------------
 
@@ -568,8 +687,13 @@ def run_live_test():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--live", action="store_true", help="Also run live API test")
+    parser.add_argument("--live",  action="store_true", help="Run live API test on 1 GSM8K trace")
+    parser.add_argument("--small", action="store_true", help="Run small verbose test: 1 trace per domain, all actions")
     args, remaining = parser.parse_known_args()
+
+    if args.small:
+        run_small_test()
+        sys.exit(0)
 
     if args.live:
         run_live_test()

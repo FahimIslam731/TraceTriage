@@ -1,4 +1,7 @@
 .venv
 .claude/
-.DS_Storesquad_b/results/
+.DS_Store
+.env
+squad_b/results/
 squad_b/cache/
+squad_c/results/
