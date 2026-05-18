@@ -176,7 +176,7 @@ All 4 LLM systems disagreed with human majority on 133 traces (20.8%). These rep
 | Freeze train/dev/test splits using human majority labels | Squad A |
 | Use consolidated CSV as training data | Squad B |
 | Address class imbalance (stratified sampling, class weights) | Squad B |
-| Investigate 133 full-disagreement traces for prompt improvement | Squad A/C |
+| Resolve 133 full-disagreement traces via discussion | Squad A |
 
 ---
 
