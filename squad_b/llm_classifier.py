@@ -22,17 +22,23 @@ from .data_loader import (
     TARGET_CLASSES,
     build_dataset,
     flatten_trace_to_text,
-    get_index_splits,
+    get_train_test_indices,
 )
 from .evaluator import confusion_matrix_str, evaluate, print_report, save_results
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_MODEL = "google/gemini-3-flash-preview"
+MODEL_PRESETS = {
+    "default": DEFAULT_MODEL,
+    "gpt5-mini": "openai/gpt-5-mini",
+    "gemini-flash-lite": "google/gemini-2.0-flash-lite-001",
+}
 
 CACHE_DIR = Path(__file__).resolve().parent / "cache"
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
 
 ACTION_DEFINITIONS = """Recovery Action Definitions:
+- LOCAL_REPAIR: CausalFlow found a localized reasoning, code, or tool step whose counterfactual repair resolves the failure.
 - RETRIEVE_MORE: The agent failed due to insufficient or missing information. It needs to fetch additional data, run more searches, or consult extra sources.
 - REPLAN: The agent's overall strategy was wrong. It needs to try a completely different approach rather than tweaking the current one.
 - TOOL_FIX: A tool call failed or returned an error. The agent should fix the tool usage (correct arguments, handle errors) and retry.
@@ -63,21 +69,64 @@ def _parse_action(response: str) -> str:
     """Extract an action label from LLM response text."""
     response_upper = response.upper()
     # Try exact match first
-    for action in TARGET_CLASSES:
+    for action in sorted(TARGET_CLASSES, key=len, reverse=True):
         if action in response_upper:
             return action
     # Regex fallback
-    match = re.search(r"(RETRIEVE_MORE|REPLAN|TOOL_FIX|RETRY|ESCALATE)", response_upper)
+    match = re.search(r"(LOCAL_REPAIR|RETRIEVE_MORE|REPLAN|TOOL_FIX|RETRY|ESCALATE)", response_upper)
     if match:
         return match.group(1)
     return "UNKNOWN"
 
 
-def _build_zero_shot_prompt(trace_text: str) -> str:
+def _parse_prediction(response: str) -> dict:
+    """Parse action/confidence from either JSON or plain action responses."""
+    text = response.strip()
+    if text.startswith("```json"):
+        text = text.removeprefix("```json").strip()
+    if text.startswith("```"):
+        text = text.removeprefix("```").strip()
+    if text.endswith("```"):
+        text = text[:-3].strip()
+
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return {"action": _parse_action(text), "confidence": None}
+
+    action = _parse_action(str(data.get("action", "")))
+    confidence = data.get("confidence")
+    try:
+        confidence = float(confidence) if confidence is not None else None
+    except (TypeError, ValueError):
+        confidence = None
+
+    if confidence is not None:
+        confidence = max(0.0, min(1.0, confidence))
+    return {"action": action, "confidence": confidence}
+
+
+def resolve_model(model: str | None = None, model_preset: str = "default") -> str:
+    """Resolve a CLI model preset or explicit OpenRouter model ID."""
+    if model:
+        return model
+    return MODEL_PRESETS.get(model_preset, DEFAULT_MODEL)
+
+
+def _safe_cache_name(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", value)
+
+
+def _build_zero_shot_prompt(trace_text: str, json_output: bool = False) -> str:
+    output_instruction = (
+        'Respond with JSON: {"action": "<one action>", "confidence": <0.0 to 1.0>}.'
+        if json_output
+        else f"Respond with ONLY the action name (one of: {', '.join(TARGET_CLASSES)})."
+    )
     return f"""{ACTION_DEFINITIONS}
 
 Given the following failed agent trace, classify the best recovery action.
-Respond with ONLY the action name (one of: RETRIEVE_MORE, REPLAN, TOOL_FIX, RETRY, ESCALATE).
+{output_instruction}
 
 Trace:
 {_truncate_trace_text(trace_text)}
@@ -85,11 +134,15 @@ Trace:
 Best recovery action:"""
 
 
-def _build_few_shot_prompt(trace_text: str, examples: list[dict]) -> str:
+def _build_few_shot_prompt(trace_text: str, examples: list[dict], json_output: bool = False) -> str:
     example_strs = []
     for ex in examples:
         ex_text = _truncate_trace_text(ex["text"], max_chars=1500)
-        example_strs.append(f"Trace:\n{ex_text}\nBest recovery action: {ex['label']}")
+        if json_output:
+            answer = json.dumps({"action": ex["label"], "confidence": 1.0})
+        else:
+            answer = ex["label"]
+        example_strs.append(f"Trace:\n{ex_text}\nBest recovery action: {answer}")
 
     examples_block = "\n\n---\n\n".join(example_strs)
     return f"""{ACTION_DEFINITIONS}
@@ -100,7 +153,7 @@ Here are some labeled examples:
 
 ---
 
-Now classify this trace. Respond with ONLY the action name.
+Now classify this trace. {"Respond with JSON including action and confidence." if json_output else "Respond with ONLY the action name."}
 
 Trace:
 {_truncate_trace_text(trace_text)}
@@ -133,7 +186,10 @@ def run_llm_classification(
     test_size: float = 0.2,
     limit: int | None = None,
     model: str = DEFAULT_MODEL,
+    model_preset: str = "default",
     k_per_class: int = 1,
+    json_output: bool = False,
+    input_variant: str = "full_trace",
 ) -> dict:
     """Run LLM-based classification (zero-shot or few-shot).
 
@@ -143,17 +199,20 @@ def run_llm_classification(
         model: OpenRouter model ID.
         k_per_class: Examples per class for few-shot mode.
     """
+    model = resolve_model(model if model != DEFAULT_MODEL else None, model_preset)
     client = _get_client()
     if client is None:
         print("ERROR: OPENROUTER_API_KEY not set.")
         sys.exit(1)
 
     print("Loading dataset...")
-    ds = build_dataset(use_sqlite_features=False)
+    ds = build_dataset(use_sqlite_features=False, input_variant=input_variant)
     texts, labels = ds["texts"], ds["labels"]
     trace_ids = ds["trace_ids"]
 
-    train_idx, test_idx = get_index_splits(len(labels), labels, test_size, RANDOM_SEED)
+    train_idx, test_idx, dev_idx = get_train_test_indices(
+        ds, labels, test_size, RANDOM_SEED
+    )
 
     # For few-shot, select examples from training set
     examples = []
@@ -167,7 +226,10 @@ def run_llm_classification(
     y_true = labels[eval_idx]
 
     method_name = f"llm_{mode}shot"
-    cache_path = CACHE_DIR / f"{method_name}_predictions.json"
+    cache_name = _safe_cache_name(
+        f"{method_name}_{model}_{input_variant}_k{k_per_class}_{'json' if json_output else 'plain'}"
+    )
+    cache_path = CACHE_DIR / f"{cache_name}_predictions.json"
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
     # Load any cached predictions
@@ -187,9 +249,9 @@ def run_llm_classification(
             continue
 
         if mode == "few":
-            prompt = _build_few_shot_prompt(texts[idx], examples)
+            prompt = _build_few_shot_prompt(texts[idx], examples, json_output=json_output)
         else:
-            prompt = _build_zero_shot_prompt(texts[idx])
+            prompt = _build_zero_shot_prompt(texts[idx], json_output=json_output)
 
         try:
             resp = client.chat.completions.create(
@@ -199,14 +261,16 @@ def run_llm_classification(
                 max_tokens=50,
             )
             content = resp.choices[0].message.content or ""
-            action = _parse_action(content)
+            parsed = _parse_prediction(content)
+            action = parsed["action"]
+            confidence = parsed["confidence"]
             usage = resp.usage
             tokens = (usage.prompt_tokens + usage.completion_tokens) if usage else 0
             total_tokens += tokens
 
             cached_preds[tid] = {
                 "action": action, "raw": content.strip(),
-                "tokens": tokens,
+                "tokens": tokens, "confidence": confidence,
             }
             predictions.append(action)
             status = "OK" if action != "UNKNOWN" else "PARSE_FAIL"
@@ -236,6 +300,9 @@ def run_llm_classification(
         "model": model, "mode": mode, "k_per_class": k_per_class,
         "n_evaluated": len(eval_idx), "total_tokens": total_tokens,
         "random_seed": RANDOM_SEED,
+        "split_source": "squad_a_frozen" if dev_idx is not None else "random",
+        "json_output": json_output,
+        "input_variant": input_variant,
     })
 
     return results
