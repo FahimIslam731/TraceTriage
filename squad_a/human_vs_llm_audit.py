@@ -70,36 +70,6 @@ def majority_vote(labels: list[str]) -> tuple[str, float]:
     return top_label, top_count / len(valid)
 
 
-def fleiss_kappa(matrix):
-    """
-    Compute Fleiss' kappa for a matrix of shape (N_subjects, N_categories).
-    matrix[i][j] = number of raters who assigned category j to subject i.
-    """
-    N = len(matrix)       # number of subjects
-    n = sum(matrix[0])    # number of raters per subject
-    k = len(matrix[0])    # number of categories
-
-    if N == 0 or n <= 1:
-        return 0.0
-
-    # p_j = proportion of all assignments to category j
-    p = [sum(matrix[i][j] for i in range(N)) / (N * n) for j in range(k)]
-
-    # P_i = extent of agreement for subject i
-    P = [
-        (sum(matrix[i][j] ** 2 for j in range(k)) - n) / (n * (n - 1))
-        for i in range(N)
-    ]
-
-    P_bar = sum(P) / N
-    P_e = sum(pj ** 2 for pj in p)
-
-    if P_e == 1.0:
-        return 1.0
-
-    return (P_bar - P_e) / (1.0 - P_e)
-
-
 def cohen_kappa(labels_a: list, labels_b: list) -> float:
     """Compute Cohen's kappa between two raters."""
     assert len(labels_a) == len(labels_b)
@@ -184,33 +154,7 @@ def main():
     print("SECTION 1: HUMAN INTER-ANNOTATOR AGREEMENT")
     print("=" * 70)
 
-    # 3a. Fleiss' kappa
-    all_cats = sorted(VALID_LABELS)
-    cat_to_idx = {c: i for i, c in enumerate(all_cats)}
-
-    fleiss_matrix = []
-    for d in data:
-        row = [0] * len(all_cats)
-        for lbl in d["human_labels"]:
-            if lbl and lbl in cat_to_idx:
-                row[cat_to_idx[lbl]] += 1
-        fleiss_matrix.append(row)
-
-    fk = fleiss_kappa(fleiss_matrix)
-    print(f"\n  Fleiss' kappa (all 6 raters): {fk:.4f}")
-    if fk < 0.20:
-        fk_interp = "Slight"
-    elif fk < 0.40:
-        fk_interp = "Fair"
-    elif fk < 0.60:
-        fk_interp = "Moderate"
-    elif fk < 0.80:
-        fk_interp = "Substantial"
-    else:
-        fk_interp = "Almost Perfect"
-    print(f"  Interpretation: {fk_interp} agreement")
-
-    # 3b. Pairwise Cohen's kappa
+    # 3a. Pairwise Cohen's kappa
     print(f"\n  Pairwise Cohen's kappa:")
     kappas = []
     for (i, name_a), (j, name_b) in combinations(enumerate(HUMAN_COLS), 2):

@@ -86,6 +86,35 @@ def confusion_matrix_str(
     return "\n".join(lines)
 
 
+def confusion_matrix_dict(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    class_names: Optional[list[str]] = None,
+) -> dict:
+    """Return confusion matrix as JSON-serializable labels + matrix."""
+    if class_names is None:
+        class_names = sorted(set(y_true) | set(y_pred))
+    cm = confusion_matrix(y_true, y_pred, labels=class_names)
+    return {
+        "labels": list(class_names),
+        "matrix": cm.astype(int).tolist(),
+    }
+
+
+def confusion_matrices_by_group(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    groups: np.ndarray,
+    class_names: Optional[list[str]] = None,
+) -> dict:
+    """Return JSON-serializable confusion matrices per group."""
+    grouped = {}
+    for group in sorted(set(groups)):
+        mask = groups == group
+        grouped[str(group)] = confusion_matrix_dict(y_true[mask], y_pred[mask], class_names)
+    return grouped
+
+
 def print_report(results: dict, method_name: str) -> None:
     """Print a formatted evaluation report to console."""
     print(f"\n{'=' * 60}")
@@ -104,6 +133,32 @@ def print_report(results: dict, method_name: str) -> None:
             f"{m['f1']:>8.4f} {m['support']:>8}"
         )
     print()
+
+
+def evaluate_by_group(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    groups: np.ndarray,
+    class_names: Optional[list[str]] = None,
+) -> dict:
+    """Compute metrics separately for each group, e.g. domain."""
+    grouped = {}
+    for group in sorted(set(groups)):
+        mask = groups == group
+        grouped[str(group)] = evaluate(y_true[mask], y_pred[mask], class_names)
+    return grouped
+
+
+def print_group_summary(grouped_results: dict, title: str) -> None:
+    """Print compact per-group accuracy/macro-F1 rows."""
+    print(f"\n{title}")
+    print(f"  {'Group':<16} {'Macro F1':>10} {'Accuracy':>10} {'N':>8}")
+    print(f"  {'-' * 48}")
+    for group, result in grouped_results.items():
+        print(
+            f"  {group:<16} {result['macro_f1']:>10.4f} "
+            f"{result['accuracy']:>10.4f} {result['n_samples']:>8}"
+        )
 
 
 def save_results(results: dict, method_name: str, extra: Optional[dict] = None) -> Path:

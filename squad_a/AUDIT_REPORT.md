@@ -34,13 +34,7 @@ Labeling traces by hand doesn't scale. If LLM auto-labels are reliable, we can l
 
 Before trusting the human labels, we measured how well the 6 annotators agreed with each other.
 
-### Fleiss' Kappa (all 6 raters)
 
-| Metric | Value | Interpretation |
-|--------|-------|----------------|
-| **Fleiss' κ** | **0.7628** | Substantial agreement |
-
-Fleiss' kappa measures agreement across all raters simultaneously, corrected for chance. A value of 0.76 means humans substantially agree on the correct label — our majority-vote ground truth is reliable.
 
 ### Pairwise Cohen's Kappa
 
@@ -153,7 +147,7 @@ For context: random guessing with 6 labels would give ~17% accuracy. The LLMs ar
 ## 4. Key Findings
 
 ### Finding 1: Human labels are reliable ground truth
-With Fleiss' κ = 0.76 and 84% of traces at ≥5/6 agreement, the majority-vote labels are trustworthy for training and evaluation.
+With a mean pairwise Cohen's κ = 0.76 and 84% of traces at ≥5/6 agreement, the majority-vote labels are trustworthy for training and evaluation.
 
 ### Finding 2: LLM auto-labels are moderately accurate but not a replacement
 At 64% accuracy (κ=0.47), LLMs are better than random but substantially worse than human agreement. They cannot be used as sole ground truth.
