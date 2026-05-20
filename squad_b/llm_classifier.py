@@ -222,7 +222,27 @@ def run_llm_classification(
               f"({k_per_class} per class)")
 
     # Limit test set if requested
-    eval_idx = test_idx[:limit] if limit else test_idx
+    if limit:
+        rng = np.random.RandomState(RANDOM_SEED)
+        eval_idx_list = []
+        per_class = max(1, limit // len(TARGET_CLASSES))
+        for cls in TARGET_CLASSES:
+            cls_indices = [i for i in test_idx if labels[i] == cls]
+            if cls_indices:
+                chosen = rng.choice(cls_indices, size=min(per_class, len(cls_indices)), replace=False)
+                eval_idx_list.extend(chosen)
+        
+        if len(eval_idx_list) < limit:
+            remaining = [i for i in test_idx if i not in eval_idx_list]
+            if remaining:
+                top_up = rng.choice(remaining, size=min(limit - len(eval_idx_list), len(remaining)), replace=False)
+                eval_idx_list.extend(top_up)
+                
+        eval_idx = np.array(eval_idx_list)
+        rng.shuffle(eval_idx)
+    else:
+        eval_idx = test_idx
+        
     y_true = labels[eval_idx]
 
     method_name = f"llm_{mode}shot"

@@ -18,7 +18,7 @@ from sklearn.preprocessing import LabelEncoder
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 
-from .data_loader import RANDOM_SEED, build_dataset, get_train_test_indices
+from .data_loader import RANDOM_SEED, TARGET_CLASSES, build_dataset, get_train_test_indices
 from .evaluator import (
     confusion_matrix_str,
     evaluate,
@@ -88,12 +88,61 @@ def load_cache(input_variant: str = "full_trace") -> tuple[np.ndarray, list[str]
     return None
 
 
-def run_embedding_pipeline(test_size: float = 0.2, input_variant: str = "full_trace") -> dict:
+def run_embedding_pipeline(test_size: float = 0.2, input_variant: str = "full_trace", limit: int | None = None) -> dict:
     """Run embedding-based classification (SVM, LogReg, optional XGBoost)."""
     print("Loading dataset...")
     ds = build_dataset(use_sqlite_features=False, input_variant=input_variant)
     texts, labels, trace_ids = ds["texts"], ds["labels"], ds["trace_ids"]
     domains = np.array([t.get("domain", "") for t in ds["traces"]])
+
+    train_idx, test_idx, dev_idx = get_train_test_indices(
+        ds, labels, test_size, RANDOM_SEED
+    )
+
+    if limit:
+        rng = np.random.RandomState(RANDOM_SEED)
+        
+        def _stratified_subset(indices: np.ndarray, limit: int) -> np.ndarray:
+            subset = []
+            per_class = max(1, limit // len(TARGET_CLASSES))
+            for cls in TARGET_CLASSES:
+                cls_indices = [i for i in indices if labels[i] == cls]
+                if cls_indices:
+                    chosen = rng.choice(cls_indices, size=min(per_class, len(cls_indices)), replace=False)
+                    subset.extend(chosen)
+            
+            if len(subset) < limit:
+                remaining = [i for i in indices if i not in subset]
+                if remaining:
+                    top_up = rng.choice(remaining, size=min(limit - len(subset), len(remaining)), replace=False)
+                    subset.extend(top_up)
+                    
+            subset_arr = np.array(subset)
+            rng.shuffle(subset_arr)
+            return subset_arr
+
+        train_idx = _stratified_subset(train_idx, limit)
+        test_idx = _stratified_subset(test_idx, limit)
+        if dev_idx is not None:
+            dev_idx = _stratified_subset(dev_idx, limit)
+        
+        subset_idx = np.concatenate([train_idx, test_idx])
+        if dev_idx is not None:
+            subset_idx = np.concatenate([subset_idx, dev_idx])
+            
+        texts = [texts[i] for i in subset_idx]
+        trace_ids = [trace_ids[i] for i in subset_idx]
+        labels = labels[subset_idx]
+        domains = domains[subset_idx]
+        
+        # Remap indices
+        new_train_idx = np.arange(len(train_idx))
+        new_test_idx = np.arange(len(train_idx), len(train_idx) + len(test_idx))
+        if dev_idx is not None:
+            new_dev_idx = np.arange(len(train_idx) + len(test_idx), len(subset_idx))
+            dev_idx = new_dev_idx
+            
+        train_idx, test_idx = new_train_idx, new_test_idx
 
     # Try cache first
     cached = load_cache(input_variant)
@@ -113,12 +162,9 @@ def run_embedding_pipeline(test_size: float = 0.2, input_variant: str = "full_tr
             sys.exit(1)
         print(f"Embedding {len(texts)} traces with {EMBED_MODEL}...")
         embeddings = embed_texts(texts, client)
-        save_cache(embeddings, trace_ids, input_variant)
+        if not limit:  # Only save cache if we are embedding the full dataset
+            save_cache(embeddings, trace_ids, input_variant)
 
-    # Split
-    train_idx, test_idx, dev_idx = get_train_test_indices(
-        ds, labels, test_size, RANDOM_SEED
-    )
     X_train, X_test = embeddings[train_idx], embeddings[test_idx]
     y_train, y_test = labels[train_idx], labels[test_idx]
     test_domains = domains[test_idx]
