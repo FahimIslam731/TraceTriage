@@ -1,7 +1,36 @@
-.venv
-.claude/
-.DS_Store
+# Python
+.venv/
+__pycache__/
+squad_c/__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Environment
 .env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Claude
+.claude/
+
+# Data — large files, never commit
+raw_data/
+data/causal_runs.sqlite
+
+# Results — gitignored, zip and share manually
 squad_b/results/
 squad_b/cache/
 squad_c/results/
+
+# Word docs (use the shared drive copy)
+*.docx
+
+# Working notes
+traces_to_label.txt

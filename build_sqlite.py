@@ -523,7 +523,12 @@ def insert_failed_trace_analysis(conn, run, trace, trace_id, problem_id):
     analysis = trace.get("analysis", {}) or {}
     metrics = trace.get("metrics", {}) or {}
     repair_metrics = metrics.get("repairs", {}) or {}
-    counterfactual_repair = analysis.get("counterfactual_repair", {}) or {}
+    counterfactual_repair = analysis.get("counterfactual_repair") or {}
+    # MBPP stores repairs directly in final_repairs (not nested under successful_repairs)
+    if not counterfactual_repair:
+        raw_final = analysis.get("final_repairs") or {}
+        if raw_final:
+            counterfactual_repair = {"successful_repairs": raw_final}
     multi_agent = analysis.get("multi_agent_critique", {}) or {}
     successful_repairs = successful_repair_items(counterfactual_repair)
     repairable_step_ids = {int(step_id) for step_id, _ in successful_repairs if str(step_id).isdigit()}
