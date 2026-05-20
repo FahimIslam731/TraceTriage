@@ -9,6 +9,7 @@ Usage:
     python -m squad_b.main --task ablations
     python -m squad_b.main --task llm-zero --limit 10
     python -m squad_b.main --task llm-zero --model-preset gpt5-mini --json-output
+    python -m squad_b.main --task cross-domain --llm-cross-domain --model-preset gpt5-mini --k-per-class 5 --json-output
     python -m squad_b.main --task all
 """
 import argparse
@@ -38,6 +39,10 @@ def main() -> None:
                         help="Few-shot examples per class (default: 1)")
     parser.add_argument("--json-output", action="store_true",
                         help="Ask LLM tasks for JSON action/confidence output")
+    parser.add_argument("--print-prompts", action="store_true",
+                        help="Print full LLM prompts before each API call")
+    parser.add_argument("--max-tokens", type=int, default=512,
+                        help="Max completion tokens for LLM tasks")
     parser.add_argument("--calibration-cache", type=str, default=None,
                         help="Cached LLM prediction JSON to calibrate")
     parser.add_argument("--input-variant", type=str, default="full_trace",
@@ -49,6 +54,8 @@ def main() -> None:
                         help="Run input ablations with structured features stacked")
     parser.add_argument("--min-domain-samples", type=int, default=10,
                         help="Minimum examples required for cross-domain held-out evaluation")
+    parser.add_argument("--llm-cross-domain", action="store_true",
+                        help="Also run LLM few-shot during cross-domain evaluation")
     args = parser.parse_args()
 
     if args.task == "all-local":
@@ -72,7 +79,7 @@ def main() -> None:
 
         elif task == "embedding":
             from .embedding_pipeline import run_embedding_pipeline
-            run_embedding_pipeline(input_variant=args.input_variant)
+            run_embedding_pipeline(input_variant=args.input_variant, limit=args.limit)
 
         elif task == "llm-zero":
             from .llm_classifier import run_llm_classification
@@ -83,6 +90,8 @@ def main() -> None:
                 model_preset=args.model_preset,
                 json_output=args.json_output,
                 input_variant=args.input_variant,
+                print_prompts=args.print_prompts,
+                max_tokens=args.max_tokens,
             )
 
         elif task == "llm-few":
@@ -91,7 +100,9 @@ def main() -> None:
                                    model_preset=args.model_preset,
                                    k_per_class=args.k_per_class,
                                    json_output=args.json_output,
-                                   input_variant=args.input_variant)
+                                   input_variant=args.input_variant,
+                                   print_prompts=args.print_prompts,
+                                   max_tokens=args.max_tokens)
 
         elif task == "llm-calibration":
             from .llm_calibration import run_llm_calibration
@@ -102,6 +113,15 @@ def main() -> None:
             run_cross_domain_evaluation(
                 use_structured=not args.no_structured,
                 min_domain_samples=args.min_domain_samples,
+                input_variant=args.input_variant,
+                run_llm_fewshot=args.llm_cross_domain,
+                llm_limit=args.limit,
+                llm_model=args.model,
+                llm_model_preset=args.model_preset,
+                llm_k_per_class=args.k_per_class,
+                llm_json_output=args.json_output,
+                print_prompts=args.print_prompts,
+                llm_max_tokens=args.max_tokens,
             )
 
         elif task == "ablations":
