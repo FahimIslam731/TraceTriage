@@ -125,6 +125,15 @@ def _summarize_transfer_gap(summary_rows: list[dict], in_domain_reference: dict)
 def run_cross_domain_evaluation(
     use_structured: bool = True,
     min_domain_samples: int = 10,
+    input_variant: str = "full_trace",
+    run_llm_fewshot: bool = False,
+    llm_limit: int | None = None,
+    llm_model: str | None = None,
+    llm_model_preset: str = "default",
+    llm_k_per_class: int = 5,
+    llm_json_output: bool = False,
+    print_prompts: bool = False,
+    llm_max_tokens: int = 512,
 ) -> dict:
     """Run leave-one-domain-out evaluation for Experiment 3.
 
@@ -135,7 +144,7 @@ def run_cross_domain_evaluation(
     shortcut-detection reference.
     """
     print("Loading dataset...")
-    ds = build_dataset(use_sqlite_features=use_structured)
+    ds = build_dataset(use_sqlite_features=use_structured, input_variant=input_variant)
     texts = ds["texts"]
     labels = ds["labels"]
     structured = ds["structured"]
@@ -239,6 +248,38 @@ def run_cross_domain_evaluation(
             summary_rows, domain, "tfidf_rf", rf_res, len(train_idx), len(test_idx)
         )
 
+        if run_llm_fewshot:
+            print("\nRunning LLM few-shot on held-out domain...")
+            from .llm_classifier import run_llm_on_indices
+
+            llm_output = run_llm_on_indices(
+                ds=ds,
+                train_idx=train_idx,
+                eval_idx=test_idx,
+                mode="few",
+                limit=llm_limit,
+                model=llm_model,
+                model_preset=llm_model_preset,
+                k_per_class=llm_k_per_class,
+                json_output=llm_json_output,
+                input_variant=input_variant,
+                cache_scope=f"cross_domain_{domain}",
+                result_name=f"cross_domain_llm_fewshot_{domain}",
+                print_prompts=print_prompts,
+                max_tokens=llm_max_tokens,
+                save_result=False,
+                extra={
+                    "heldout_domain": domain,
+                    "experiment": "cross_domain",
+                },
+            )
+            llm_res = llm_output["metrics"]
+            method = f"llm_fewshot_{llm_model_preset}"
+            domain_results[method] = llm_res
+            _append_summary_row(
+                summary_rows, domain, method, llm_res, len(train_idx), len(llm_output["eval_idx"])
+            )
+
         all_results[domain] = domain_results
 
     per_action_transfer = _summarize_per_action_transfer(all_results)
@@ -257,6 +298,14 @@ def run_cross_domain_evaluation(
     save_results(output, "cross_domain", extra={
         "use_structured": use_structured,
         "min_domain_samples": min_domain_samples,
+        "input_variant": input_variant,
+        "run_llm_fewshot": run_llm_fewshot,
+        "llm_limit": llm_limit,
+        "llm_model": llm_model,
+        "llm_model_preset": llm_model_preset,
+        "llm_k_per_class": llm_k_per_class,
+        "llm_json_output": llm_json_output,
+        "llm_max_tokens": llm_max_tokens,
         "random_seed": RANDOM_SEED,
     })
 

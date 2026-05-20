@@ -214,8 +214,10 @@ def run_embedding_pipeline(test_size: float = 0.2, input_variant: str = "full_tr
 
     try:
         from xgboost import XGBClassifier
-    except ImportError:
-        print("\nSkipping Embedding + XGBoost: install xgboost to enable it.")
+    except Exception as exc:
+        print("\nSkipping Embedding + XGBoost: xgboost could not be loaded.")
+        print(f"  Reason: {exc}")
+        print("  On macOS, this usually means OpenMP is missing: brew install libomp")
     else:
         print("\nTraining XGBoost on embeddings...")
         label_encoder = LabelEncoder()

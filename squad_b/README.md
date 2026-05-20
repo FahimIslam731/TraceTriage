@@ -61,6 +61,7 @@ squad_b/
 - Runs Experiment 3 leave-one-domain-out evaluation
 - Trains on all domains except one held-out domain, then evaluates on that held-out domain
 - Reports global majority, oracle domain-mode reference, TF-IDF + Logistic Regression, and TF-IDF + Random Forest
+- Optionally runs LLM few-shot on each held-out domain with `--llm-cross-domain`
 - Saves per-action transfer success and transfer gap versus in-domain TF-IDF results
 - Skips very small domains by default; control this with `--min-domain-samples`
 
@@ -82,6 +83,7 @@ squad_b/
 ### `llm_calibration.py`
 - Reads cached LLM JSON-confidence predictions without calling any API
 - Computes expected calibration error (ECE) bins and saves `results/llm_calibration_results.json`
+- Saves a reliability diagram SVG in `results/`
 
 ### `evaluator.py`
 - `evaluate()` → accuracy, macro F1, weighted F1, per-class precision/recall/F1/support
@@ -118,11 +120,26 @@ python -m squad_b.main --task cross-domain --no-structured
 export OPENROUTER_API_KEY="your-key-here"
 python -m squad_b.main --task embedding
 
+# Embedding + XGBoost needs xgboost installed; the embedding task runs it automatically if available
+python -m pip install xgboost
+python -m squad_b.main --task embedding
+
 # LLM zero-shot/few-shot examples (requires OPENROUTER_API_KEY)
 python -m squad_b.main --task llm-zero --model-preset gpt5-mini --json-output
 python -m squad_b.main --task llm-few --model-preset gpt5-mini --k-per-class 5 --json-output
 python -m squad_b.main --task llm-zero --model-preset gemini-flash-lite --json-output
 python -m squad_b.main --task llm-few --model-preset gemini-flash-lite --k-per-class 5 --json-output
+
+# Small LLM smoke tests to control token spend
+python -m squad_b.main --task llm-zero --model-preset gpt5-mini --limit 15 --json-output --max-tokens 512
+python -m squad_b.main --task llm-few --model-preset gpt5-mini --k-per-class 5 --limit 15 --json-output --max-tokens 512
+
+# Experiment 3 with the required LLM few-shot model added to each held-out domain
+python -m squad_b.main --task cross-domain --llm-cross-domain --model-preset gpt5-mini --k-per-class 5 --json-output
+python -m squad_b.main --task cross-domain --llm-cross-domain --model-preset gemini-flash-lite --k-per-class 5 --json-output
+
+# Limited cross-domain LLM smoke test before spending on the full held-out domains
+python -m squad_b.main --task cross-domain --llm-cross-domain --model-preset gpt5-mini --k-per-class 5 --limit 15 --json-output
 
 # Calibration from cached LLM JSON-confidence predictions (no API call)
 python -m squad_b.main --task llm-calibration
