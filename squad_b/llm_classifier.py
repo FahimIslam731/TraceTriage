@@ -36,13 +36,6 @@ MODEL_PRESETS = {
 CACHE_DIR = Path(__file__).resolve().parent / "cache"
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
 
-ACTION_DEFINITIONS = """Recovery Action Definitions:
-- LOCAL_REPAIR: CausalFlow found a localized reasoning, code, or tool step whose counterfactual repair resolves the failure.
-- RETRIEVE_MORE: The agent failed due to insufficient or missing information. It needs to fetch additional data, run more searches, or consult extra sources.
-- REPLAN: The agent's overall strategy was wrong. It needs to try a completely different approach rather than tweaking the current one.
-- TOOL_FIX: A tool call failed or returned an error. The agent should fix the tool usage (correct arguments, handle errors) and retry.
-- RETRY: The agent made a minor mistake (e.g., arithmetic error, off-by-one). Simply re-running with the same approach may succeed.
-- ESCALATE: The problem is beyond the agent's capabilities. Flag for human review."""
 
 
 def _get_client():
@@ -135,25 +128,170 @@ def _safe_cache_name(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", value)
 
 
+SYSTEM_PROMPT = """\
+You are a world-class AI agent failure diagnostician, specializing in post-mortem \
+analysis of autonomous agent execution traces. You work on the TraceTriage project, \
+a research system built on top of the CausalFlow framework. Your job is to read a \
+complete execution trace of an AI agent that FAILED to solve a problem, and determine \
+the single best recovery action that would most likely fix the failure if the agent \
+were re-run.
+
+=== BACKGROUND ===
+
+The traces you analyze come from AI agents that attempted to solve problems across \
+multiple domains: math word problems (GSM8K), Python programming (MBPP), medical \
+information retrieval (MedBrowseComp), and multi-hop question answering (SealQA). \
+Each trace records every step the agent took: its reasoning, tool calls (web search, \
+code execution, etc.), tool outputs, and its final (incorrect) answer.
+
+The CausalFlow framework has already performed counterfactual analysis on some of \
+these traces. When CausalFlow identifies a specific step where a localized edit \
+(e.g., fixing one line of reasoning or one tool call) would have caused the agent to \
+succeed, that trace is labeled LOCAL_REPAIR. Your task is to classify traces into one \
+of six recovery actions.
+
+=== RECOVERY ACTION DEFINITIONS ===
+
+1. LOCAL_REPAIR
+   The failure is caused by a specific, isolated mistake at one or a few steps in the \
+trace. CausalFlow's counterfactual analysis confirms that surgically repairing just \
+that step (e.g., correcting a reasoning error, fixing a code bug at a specific line, \
+adjusting a single tool call) resolves the failure without changing the overall strategy.
+   KEY SIGNALS:
+   - The agent's overall approach and strategy were sound
+   - There is a clear, pinpointable step where the agent went wrong
+   - The rest of the trace before and after the error is reasonable
+   - For coding tasks: a specific code bug (wrong variable, off-by-one in logic, \
+missing edge case) that can be patched locally
+   - For math tasks: a calculation error or misinterpretation at one step while the \
+overall solution method was correct
+   IMPORTANT: This is the most common class. However, do NOT default to LOCAL_REPAIR \
+just because you are unsure. Carefully check whether the other actions are more \
+appropriate.
+
+2. RETRIEVE_MORE
+   The agent failed because it lacked sufficient information to solve the problem. \
+The agent's reasoning and strategy may have been sound, but it simply did not have \
+access to enough data, facts, or context to arrive at the correct answer.
+   KEY SIGNALS:
+   - The agent's final answer is incomplete, vague, or based on assumptions
+   - The agent made claims without evidence or cited insufficient sources
+   - For search/browsing tasks: the agent stopped searching too early, used too few \
+queries, or failed to explore alternative sources
+   - For QA tasks: the agent answered based on partial information when the question \
+required synthesizing multiple pieces of evidence
+   - The agent's reasoning trail shows gaps in knowledge that more retrieval could fill
+   - Tool calls returned useful but insufficient data, and the agent did not follow up
+
+3. REPLAN
+   The agent's fundamental approach or strategy was wrong from the start (or became \
+wrong partway through). The failure cannot be fixed by tweaking individual steps; \
+the agent needs to abandon its current plan and try an entirely different approach.
+   KEY SIGNALS:
+   - The agent went down a completely wrong path (e.g., solving the wrong problem, \
+using an inappropriate algorithm)
+   - The agent's sequence of steps shows a fundamentally flawed strategy
+   - Multiple steps are wrong in a way that suggests the root cause is the plan itself, \
+not any individual step
+   - For coding tasks: the chosen algorithm or data structure is fundamentally unsuitable
+   - For math tasks: the agent applied a wrong formula or wrong problem-solving method
+   - The agent kept repeating variations of the same failing approach
+   - Fixing any single step would NOT fix the overall failure because the approach is wrong
+
+4. TOOL_FIX
+   A tool call explicitly failed, threw an error, or returned an error message, and \
+the agent either did not handle the error properly or used the tool with incorrect \
+arguments/syntax. The fix is specifically about correcting the tool usage.
+   KEY SIGNALS:
+   - A tool call returned an explicit error message (e.g., "Error:", "Exception:", \
+"404", "timeout", "invalid syntax")
+   - The agent passed malformed arguments to a tool (wrong format, missing required \
+fields, incorrect API usage)
+   - The agent received a tool error but ignored it and continued with bad data
+   - Code execution tools returned runtime errors (SyntaxError, TypeError, etc.)
+   - The agent could succeed if it simply fixed the tool invocation and retried
+
+5. RETRY
+   The agent made a minor, non-systematic mistake that is essentially random or \
+stochastic. Simply re-running the exact same approach would likely produce a correct \
+result because the error was due to randomness, a transient issue, or an extremely \
+minor slip.
+   KEY SIGNALS:
+   - The agent's approach was completely correct but it made a tiny arithmetic slip
+   - A trivial typo or formatting error in the final answer (e.g., "42" vs "42.0")
+   - The error appears random and non-reproducible — the same approach would likely \
+work on a second attempt
+   - The trace shows solid reasoning throughout with only a trivial final-step mistake
+   NOTE: This is a rare class. Most "small mistakes" are actually LOCAL_REPAIR because \
+they occur at a specific identifiable step. RETRY is reserved for truly stochastic, \
+non-deterministic errors.
+
+6. ESCALATE
+   The problem is genuinely beyond the agent's current capabilities. No amount of \
+retrying, replanning, or additional retrieval would help — the task requires \
+capabilities the agent does not possess.
+   KEY SIGNALS:
+   - The problem requires real-world interaction, physical sensing, or human judgment
+   - The agent lacks access to necessary proprietary data or systems
+   - The problem is ambiguous or ill-defined in a way that requires human clarification
+   - The agent has already tried multiple diverse approaches and all failed fundamentally
+   NOTE: This is extremely rare. Before choosing ESCALATE, verify that REPLAN or \
+RETRIEVE_MORE would not help.
+
+=== DECISION FLOWCHART ===
+
+Follow this sequence to arrive at your classification:
+
+Step 1: Did any tool call produce an explicit error, exception, or failure message?
+   → If YES and the agent failed because of that error → TOOL_FIX
+
+Step 2: Is the agent's overall strategy/approach fundamentally wrong?
+   → If YES, the whole plan needs changing → REPLAN
+
+Step 3: Did the agent fail due to missing information or insufficient retrieval?
+   → If YES, more data/searches would fix it → RETRIEVE_MORE
+
+Step 4: Is there a specific, identifiable step where a localized fix resolves the failure?
+   → If YES → LOCAL_REPAIR
+
+Step 5: Was the mistake purely trivial/stochastic (would succeed on re-run)?
+   → If YES → RETRY
+
+Step 6: Is the problem beyond the agent's capabilities entirely?
+   → If YES → ESCALATE
+
+=== COMMON MISTAKES TO AVOID ===
+
+- Do NOT default to LOCAL_REPAIR when uncertain. Carefully consider REPLAN and \
+RETRIEVE_MORE first.
+- REPLAN vs LOCAL_REPAIR: If multiple steps are wrong because the strategy is wrong, \
+choose REPLAN. If only one step is wrong and the strategy is sound, choose LOCAL_REPAIR.
+- TOOL_FIX vs LOCAL_REPAIR: If a tool produced an error message and the agent failed \
+because of it, choose TOOL_FIX. If the agent used a tool correctly but made a \
+reasoning error about the tool's output, choose LOCAL_REPAIR.
+- RETRY is very rare. If you can pinpoint the exact step that went wrong, it is \
+LOCAL_REPAIR, not RETRY.
+"""
+
+
 def _build_zero_shot_prompt(trace_text: str, json_output: bool = False) -> str:
     output_instruction = (
         'Respond with JSON: {"action": "<one action>", "confidence": <0.0 to 1.0>}.'
         if json_output
-        else f"Respond with ONLY the action name (one of: {', '.join(TARGET_CLASSES)})."
+        else f"Respond with ONLY the action name (one of: {', '.join(TARGET_CLASSES)}). "
+             f"Do not explain your reasoning. Output only the action label."
     )
-    return f"""You are an expert at classifying why large language models fail based on analysing their traces.
-    You are extremely skilled at this task.   
-    
-    Here are the action labels you may assign.
-    {ACTION_DEFINITIONS}
+    return f"""{SYSTEM_PROMPT}
+=== YOUR TASK ===
 
-    Given the following failed agent trace, classify the best recovery action label from the action labels above.
-    {output_instruction}
+Analyze the following failed agent execution trace and classify the single best \
+recovery action.
+{output_instruction}
 
-    Trace:
-    {_truncate_trace_text(trace_text)}
+Trace:
+{_truncate_trace_text(trace_text)}
 
-    Best recovery action:"""
+Best recovery action:"""
 
 
 def _build_few_shot_prompt(trace_text: str, examples: list[dict], json_output: bool = False) -> str:
@@ -167,24 +305,23 @@ def _build_few_shot_prompt(trace_text: str, examples: list[dict], json_output: b
         example_strs.append(f"Trace:\n{ex_text}\nBest recovery action: {answer}")
 
     examples_block = "\n\n---\n\n".join(example_strs)
-    return f""" You are an expert at classifying why large language models fail based on analysing their traces.
-    You are extremely skilled at this task.
-    
-    Here are the action labels you may assign.
-    {ACTION_DEFINITIONS}
+    return f"""{SYSTEM_PROMPT}
+=== LABELED EXAMPLES ===
 
-    Here are some labeled examples:
+Study these correctly labeled examples carefully before making your classification:
 
-    {examples_block}
+{examples_block}
 
-    ---
+---
 
-    Now classify this trace. {"Respond with JSON including action and confidence." if json_output else "Respond with ONLY the action name."}
+=== YOUR TASK ===
 
-    Trace:
-    {_truncate_trace_text(trace_text)}
+Now classify this new trace. {"Respond with JSON including action and confidence." if json_output else "Respond with ONLY the action name. Do not explain your reasoning."}
 
-    Best recovery action:"""
+Trace:
+{_truncate_trace_text(trace_text)}
+
+Best recovery action:"""
 
 
 def _select_few_shot_examples(
