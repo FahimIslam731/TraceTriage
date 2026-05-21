@@ -66,11 +66,12 @@ def load_failed_traces(
             t.problem_statement, t.gold_answer, t.final_answer,
             l.applicable_actions_json, l.is_local_repairable,
             -- best successful repair (if any) for LOCAL_REPAIR
-            ra.repaired_text, ra.step_id AS repair_step_id
+            ra.repaired_text, ra.step_id AS repair_step_id,
+            ra.repaired_tool_name, ra.repaired_tool_args_json
         FROM traces t
         JOIN triage_labels l ON t.trace_id = l.trace_id
         LEFT JOIN (
-            SELECT trace_id, repaired_text, step_id
+            SELECT trace_id, repaired_text, step_id, repaired_tool_name, repaired_tool_args_json
             FROM repair_attempts
             WHERE repair_succeeded = 1
             GROUP BY trace_id           -- one representative repair per trace
@@ -106,6 +107,8 @@ def load_failed_traces(
                 applicable_actions=applicable,
                 repaired_text=row["repaired_text"],
                 repair_step_id=row["repair_step_id"],
+                repaired_tool_name=row["repaired_tool_name"],
+                repaired_tool_args=json.loads(row["repaired_tool_args_json"] or "null"),
             ))
     return result
 

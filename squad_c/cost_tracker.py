@@ -14,14 +14,14 @@ from typing import Optional
 MODEL_PRICING: dict[str, dict[str, float]] = {
     "google/gemini-2.0-flash-lite-001": {"input": 0.075, "output": 0.30},
     "google/gemini-3-flash-preview":    {"input": 0.10,  "output": 0.40},
-    "openai/gpt-oss-120b":             {"input": 5.00,  "output": 15.00},
+    "openai/gpt-5-chat":                {"input": 1.25,  "output": 10.00},
     "openai/gpt-4o":                   {"input": 5.00,  "output": 15.00},
 }
 
 # Maps domain name to the model used in the original CausalFlow runs.
 DOMAIN_MODELS: dict[str, str] = {
     "GSM8K":        "google/gemini-2.0-flash-lite-001",
-    "MBPP":         "openai/gpt-oss-120b",
+    "MBPP":         "openai/gpt-5-chat",
     "SealQA":       "google/gemini-3-flash-preview",
     "MedBrowseComp":"google/gemini-3-flash-preview",
     "BrowseComp":   "google/gemini-3-flash-preview",

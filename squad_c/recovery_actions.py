@@ -5,7 +5,7 @@ All model-calling actions record token usage and latency via CostTracker.
 
 Domain -> model mapping matches the original CausalFlow runs:
   GSM8K        -> google/gemini-2.0-flash-lite-001
-  MBPP         -> openai/gpt-oss-120b
+  MBPP         -> openai/gpt-5-chat
   SealQA       -> google/gemini-3-flash-preview
   MedBrowseComp-> google/gemini-3-flash-preview
 
@@ -40,6 +40,62 @@ _SERPER_URL = "https://google.serper.dev/search"
 _SERPER_MAX_QUERIES = 5       # matches paper: "5 extra search/open/extract steps"
 _SERPER_RESULTS_PER_QUERY = 5 # snippets per search
 
+# MBPP docker helpers — cache loaded once per process
+_MBPP_TESTS_CACHE: dict[int, str] = {}
+
+
+def _load_mbpp_dataset() -> None:
+    from datasets import load_dataset
+    try:
+        ds = load_dataset("google-research-datasets/mbpp", "full", split="all")
+    except Exception:
+        ds = load_dataset("mbpp", split="all")
+    for item in ds:
+        task_id = int(item["task_id"])
+        setup = (item.get("test_setup_code") or "").strip()
+        tests = "\n".join(item.get("test_list") or [])
+        if not setup:
+            setup = _extract_class_defs(item.get("code", ""), tests)
+        _MBPP_TESTS_CACHE[task_id] = (setup + "\n\n" + tests).strip() if setup else tests
+
+
+def _extract_class_defs(code: str, tests: str) -> str:
+    """Extract class definitions from reference code that are referenced in the tests."""
+    if not code or not tests:
+        return ""
+    class_blocks = re.findall(r"(class \w+.*?)(?=\nclass |\ndef [a-z]|\Z)", code, re.DOTALL)
+    needed = []
+    for block in class_blocks:
+        cls_name = re.search(r"class (\w+)", block)
+        if cls_name and cls_name.group(1) in tests:
+            needed.append(block.strip())
+    return "\n\n".join(needed)
+
+
+def _get_mbpp_tests(problem_id: str) -> str:
+    """Return class setup + assertion code for an MBPP problem_id like 'mbpp-601'."""
+    try:
+        num = int(problem_id.split("-")[-1])
+    except (ValueError, IndexError):
+        return ""
+    if not _MBPP_TESTS_CACHE:
+        _load_mbpp_dataset()
+    return _MBPP_TESTS_CACHE.get(num, "")
+
+
+def _extract_code_block(text: str) -> str:
+    """Extract Python code from markdown fences, or return text as-is."""
+    match = re.search(r"```(?:python)?\n(.*?)```", text, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    return text.strip()
+
+
+def _get_mbpp_entry_point(tests: str) -> str:
+    """Extract expected function name from MBPP test assertions."""
+    match = re.search(r"assert\s+(\w+)\s*\(", tests)
+    return match.group(1) if match else ""
+
 
 @dataclass
 class FailedTrace:
@@ -55,6 +111,8 @@ class FailedTrace:
     # CausalFlow repair data (populated only for LOCAL_REPAIR candidates)
     repaired_text: Optional[str] = None
     repair_step_id: Optional[int] = None
+    repaired_tool_name: Optional[str] = None   # for tool-call repairs (SealQA/MedBrowseComp)
+    repaired_tool_args: Optional[dict] = None  # repaired query/args from CausalFlow
 
 
 @dataclass
@@ -307,33 +365,142 @@ def _build_result_and_record(
 # 6 Recovery Action Functions
 # ---------------------------------------------------------------------------
 
-def run_local_repair(trace: FailedTrace, tracker: CostTracker) -> RecoveryResult:
-    """Return the CausalFlow repair already computed — no new model call needed."""
+def _run_mbpp_with_docker(
+    trace: FailedTrace,
+    client: OpenAI,
+    model: str,
+    user_msg: str,
+    temperature: float,
+    tracker: CostTracker,
+    action: str,
+) -> RecoveryResult:
+    """Generate code with model, run in Docker against MBPP test suite."""
+    from .docker_code_executor import DockerCodeExecutor
+    t0 = time.perf_counter()
+    try:
+        tests = _get_mbpp_tests(trace.problem_id)
+        entry_point = _get_mbpp_entry_point(tests)
+        if entry_point:
+            user_msg = user_msg + f"\n\nIMPORTANT: Your function MUST be named `{entry_point}`."
+
+        code_response, in_tok, out_tok = _call_model(
+            client, model, _system_prompt(trace.domain), user_msg, temperature=temperature,
+        )
+        code = _extract_code_block(code_response)
+        full_code = code + "\n\n" + tests if tests else code
+
+        docker_success, docker_logs = DockerCodeExecutor().run_code(full_code)
+        latency = time.perf_counter() - t0
+
+        recovered_answer = "pass" if docker_success else ""
+        return _build_result_and_record(
+            trace, action, model, recovered_answer, in_tok, out_tok, latency, tracker,
+            metadata={"docker_used": True, "docker_logs": docker_logs[:300]},
+        )
+    except Exception as exc:
+        latency = time.perf_counter() - t0
+        return _build_result_and_record(
+            trace, action, model, "", 0, 0, latency, tracker, error=repr(exc),
+        )
+
+
+def run_local_repair(
+    trace: FailedTrace,
+    tracker: CostTracker,
+    client: Optional[OpenAI] = None,
+) -> RecoveryResult:
+    """Apply the CausalFlow pre-computed repair.
+
+    Three cases:
+    - Text repair (GSM8K): return repaired_text directly, $0.
+    - Reasoning hint + code (MBPP): feed repaired reasoning to model, run Docker.
+    - Tool-call repair (SealQA/MedBrowseComp): run repaired search query via Serper + model.
+    """
     model = _model_for(trace)
-    # repaired_text comes from repair_attempts joined at load time
-    recovered = trace.repaired_text or ""
-    success = bool(recovered)  # CausalFlow validated this repair already
+
+    # Case 1: text repair — GSM8K, cost $0
+    if trace.repaired_text and trace.domain not in ("MBPP",) and not trace.repaired_tool_name:
+        recovered = trace.repaired_text
+        rec = tracker.make_zero_cost_record(
+            trace_id=trace.trace_id, action="LOCAL_REPAIR", model=model, success=True,
+            metadata={"repair_step_id": trace.repair_step_id},
+        )
+        tracker.record(rec)
+        return RecoveryResult(
+            trace_id=trace.trace_id, action="LOCAL_REPAIR", success=True,
+            recovered_answer=recovered, input_tokens=0, output_tokens=0, total_tokens=0,
+            cost_usd=0.0, latency_seconds=0.0, model_used=model,
+            metadata={"repair_step_id": trace.repair_step_id},
+        )
+
+    # Case 2: MBPP — use repaired reasoning as hint, generate code, run Docker
+    if trace.domain == "MBPP" and trace.repaired_text and client is not None:
+        user_msg = (
+            f"Problem:\n{_trunc(trace.problem_statement, _MAX_PROBLEM_CHARS)}\n\n"
+            f"Corrected approach:\n{_trunc(trace.repaired_text, _MAX_STEP_CHARS)}\n\n"
+            "Implement this as a complete Python function."
+        )
+        return _run_mbpp_with_docker(trace, client, model, user_msg, 0.0, tracker, "LOCAL_REPAIR")
+
+    # Case 3: tool-call repair — SealQA/MedBrowseComp with repaired web_search query
+    if trace.repaired_tool_name == "web_search" and trace.repaired_tool_args and client is not None:
+        return _run_local_repair_with_search(trace, client, model, tracker)
+
+    # No repair data available
     rec = tracker.make_zero_cost_record(
-        trace_id=trace.trace_id,
-        action="LOCAL_REPAIR",
-        model=model,
-        success=success,
-        metadata={"repair_step_id": trace.repair_step_id, "repaired_text": recovered[:300]},
+        trace_id=trace.trace_id, action="LOCAL_REPAIR", model=model, success=False,
+        metadata={"repair_step_id": trace.repair_step_id},
     )
     tracker.record(rec)
     return RecoveryResult(
-        trace_id=trace.trace_id,
-        action="LOCAL_REPAIR",
-        success=success,
-        recovered_answer=recovered or None,
-        input_tokens=0,
-        output_tokens=0,
-        total_tokens=0,
-        cost_usd=0.0,
-        latency_seconds=0.0,
-        model_used=model,
+        trace_id=trace.trace_id, action="LOCAL_REPAIR", success=False,
+        recovered_answer=None, input_tokens=0, output_tokens=0, total_tokens=0,
+        cost_usd=0.0, latency_seconds=0.0, model_used=model,
         metadata={"repair_step_id": trace.repair_step_id},
     )
+
+
+def _run_local_repair_with_search(
+    trace: FailedTrace,
+    client: OpenAI,
+    model: str,
+    tracker: CostTracker,
+) -> RecoveryResult:
+    """Run LOCAL_REPAIR for tool-call repairs: execute the pre-computed better query."""
+    t0 = time.perf_counter()
+    try:
+        query = (trace.repaired_tool_args or {}).get("query", "")
+        serper_key = os.environ.get("SERPER_API_KEY", "")
+
+        evidence_parts = []
+        if serper_key and query:
+            search_results = _serper_search([query], serper_key)
+            for sr in search_results:
+                for item in sr["results"]:
+                    evidence_parts.append(f"- {item['title']}: {item['snippet']}")
+                    if item["url"]:
+                        page_text = _web_fetch(item["url"])
+                        evidence_parts.append(f"  Page excerpt: {page_text[:500]}")
+
+        context = "\n".join(evidence_parts) if evidence_parts else "(search unavailable)"
+        user_msg = (
+            f"Problem:\n{_trunc(trace.problem_statement, _MAX_PROBLEM_CHARS)}\n\n"
+            f"Search results for '{query}':\n{context[:3000]}\n\n"
+            "Based on these results, provide your final answer."
+        )
+        answer, in_tok, out_tok = _call_model(
+            client, model, _system_prompt(trace.domain), user_msg, temperature=0.3,
+        )
+        latency = time.perf_counter() - t0
+        return _build_result_and_record(
+            trace, "LOCAL_REPAIR", model, answer, in_tok, out_tok, latency, tracker,
+            metadata={"repair_query": query, "serper_used": bool(serper_key)},
+        )
+    except Exception as exc:
+        latency = time.perf_counter() - t0
+        return _build_result_and_record(
+            trace, "LOCAL_REPAIR", model, "", 0, 0, latency, tracker, error=repr(exc),
+        )
 
 
 def run_retry(trace: FailedTrace, client: OpenAI, tracker: CostTracker) -> RecoveryResult:
@@ -343,6 +510,8 @@ def run_retry(trace: FailedTrace, client: OpenAI, tracker: CostTracker) -> Recov
         f"Problem:\n{_trunc(trace.problem_statement, _MAX_PROBLEM_CHARS)}\n\n"
         "Solve this problem and provide your final answer."
     )
+    if trace.domain == "MBPP":
+        return _run_mbpp_with_docker(trace, client, model, user_msg, 1.0, tracker, "RETRY")
     t0 = time.perf_counter()
     try:
         answer, in_tok, out_tok = _call_model(client, model, _system_prompt(trace.domain), user_msg, temperature=1.0)
@@ -363,6 +532,8 @@ def run_replan(trace: FailedTrace, client: OpenAI, tracker: CostTracker) -> Reco
         f"Problem:\n{_trunc(trace.problem_statement, _MAX_PROBLEM_CHARS)}\n\n"
         "Provide your final answer using the new approach."
     )
+    if trace.domain == "MBPP":
+        return _run_mbpp_with_docker(trace, client, model, user_msg, 0.7, tracker, "REPLAN")
     t0 = time.perf_counter()
     try:
         answer, in_tok, out_tok = _call_model(client, model, _system_prompt(trace.domain), user_msg, temperature=0.7)
@@ -483,6 +654,8 @@ def run_tool_fix(trace: FailedTrace, client: OpenAI, tracker: CostTracker) -> Re
         f"Previous (wrong) answer: {_trunc(trace.final_answer, _MAX_ANSWER_CHARS)}\n\n"
         "Provide the correct final answer, avoiding the tool errors above."
     )
+    if trace.domain == "MBPP":
+        return _run_mbpp_with_docker(trace, client, model, user_msg, 0.0, tracker, "TOOL_FIX")
     t0 = time.perf_counter()
     try:
         answer, in_tok, out_tok = _call_model(client, model, _system_prompt(trace.domain), user_msg, temperature=0.0)
@@ -526,7 +699,7 @@ def run_escalate(trace: FailedTrace, tracker: CostTracker) -> RecoveryResult:
 # Dispatch
 # ---------------------------------------------------------------------------
 
-ACTION_REQUIRES_CLIENT = {"RETRY", "REPLAN", "RETRIEVE_MORE", "TOOL_FIX"}
+ACTION_REQUIRES_CLIENT = {"LOCAL_REPAIR", "RETRY", "REPLAN", "RETRIEVE_MORE", "TOOL_FIX"}
 
 
 def run_recovery(
@@ -542,7 +715,7 @@ def run_recovery(
         raise ValueError(f"Action {action} requires an OpenAI client")
 
     dispatch = {
-        "LOCAL_REPAIR":   lambda: run_local_repair(trace, tracker),
+        "LOCAL_REPAIR":   lambda: run_local_repair(trace, tracker, client),
         "RETRY":          lambda: run_retry(trace, client, tracker),
         "REPLAN":         lambda: run_replan(trace, client, tracker),
         "RETRIEVE_MORE":  lambda: run_retrieve_more(trace, client, tracker),

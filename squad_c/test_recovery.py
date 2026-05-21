@@ -444,8 +444,8 @@ class TestCostTracker(unittest.TestCase):
         self.assertAlmostEqual(cost, 0.375, places=3)
 
     def test_cost_calculation_gpt(self):
-        cost = self.tracker.compute_cost("openai/gpt-oss-120b", 1_000_000, 1_000_000)
-        self.assertAlmostEqual(cost, 20.0, places=3)
+        cost = self.tracker.compute_cost("openai/gpt-5-chat", 1_000_000, 1_000_000)
+        self.assertAlmostEqual(cost, 11.25, places=3)
 
     def test_unknown_model_zero_cost(self):
         cost = self.tracker.compute_cost("unknown/model", 999999, 999999)
