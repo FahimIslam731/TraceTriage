@@ -74,7 +74,8 @@ def load_failed_traces(
             SELECT trace_id, repaired_text, step_id, repaired_tool_name, repaired_tool_args_json
             FROM repair_attempts
             WHERE repair_succeeded = 1
-            GROUP BY trace_id           -- one representative repair per trace
+              AND repaired_text IS NOT NULL
+            GROUP BY trace_id           -- one representative text repair per trace
         ) ra ON ra.trace_id = t.trace_id
         WHERE t.is_failing_trace = 1
           AND t.is_ablation = 0

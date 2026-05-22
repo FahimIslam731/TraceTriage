@@ -31,11 +31,12 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 DB_PATH = Path("data/causal_runs.sqlite")
-LABELS_CSV = Path("squad_c/all_1212_labels.csv")   # Squad A's human majority labels
+LABELS_CSV = Path("squad_a/audit_results/all_1212_labels.csv")   # Squad A's human majority labels
 RESULTS_DIR = Path("squad_c/results")
 RESULTS_JSONL = RESULTS_DIR / "recovery_results.jsonl"
 POLICY_JSON = RESULTS_DIR / "policy_comparison.json"
 GATE_JSON = RESULTS_DIR / "decision_gate.json"
+CLF_PREDICTIONS_DIR = RESULTS_DIR / "squad_b_best_classifier" / "Gemini"
 
 # Stage A decision gate threshold (paper §5, Experiment 4 Stage B condition)
 GATE_THRESHOLD_POINTS = 5.0   # Trace Triage must beat Domain Policy by this many ppt
@@ -44,14 +45,14 @@ GATE_METRIC = "utility_lambda_1_0"  # which utility column to use for the gate (
 # Cost-adjusted utility lambdas to sweep (paper: "vary lambda")
 LAMBDAS = [0.0, 0.5, 1.0, 2.0, 5.0]
 
-# Fallback domain modal actions when triage_labels are incomplete
-# (updated once Squad A finalizes labels)
+# Fallback domain modal actions — verified from all_1212_labels.csv
+# SealQA: REPLAN (56) edges out RETRIEVE_MORE (55) by 1 trace
 DOMAIN_MODAL_FALLBACK: dict[str, str] = {
     "GSM8K":        "LOCAL_REPAIR",
     "MBPP":         "LOCAL_REPAIR",
-    "SealQA":       "RETRIEVE_MORE",
+    "SealQA":       "REPLAN",
     "MedBrowseComp":"RETRIEVE_MORE",
-    "BrowseComp":   "RETRIEVE_MORE",
+    "BrowseComp":   "LOCAL_REPAIR",
 }
 
 RETRIEVE_MORE_DOMAINS = {"SealQA", "MedBrowseComp", "BrowseComp"}
@@ -74,6 +75,22 @@ def load_results(path: Path) -> dict[str, dict[str, dict]]:
             rec = json.loads(line)
             by_trace[rec["trace_id"]][rec["action"]] = rec
     return dict(by_trace)
+
+
+def load_clf_predictions(pred_dir: Path) -> dict[str, str]:
+    """Load Squad B best-classifier predictions from per-domain JSON files.
+
+    Returns {trace_id: predicted_action} merged across all domains.
+    """
+    if not pred_dir.exists():
+        print(f"Warning: classifier predictions dir not found: {pred_dir}")
+        return {}
+    preds: dict[str, str] = {}
+    for f in sorted(pred_dir.glob("*.json")):
+        data = json.loads(f.read_text(encoding="utf-8"))
+        for trace_id, rec in data.items():
+            preds[trace_id] = rec["action"]
+    return preds
 
 
 def load_squad_a_labels(csv_path: Path) -> dict[str, str]:
@@ -173,6 +190,13 @@ def policy_trace_triage(trace_id: str, domain: str, trace_results: dict, action_
     return _pick(trace_results, action_label)
 
 
+def policy_trace_triage_clf(trace_id: str, domain: str, trace_results: dict, clf_preds: dict[str, str]) -> dict | None:
+    predicted = clf_preds.get(trace_id)
+    if not predicted:
+        return None  # trace not covered by classifier — excluded
+    return _pick(trace_results, predicted)
+
+
 def policy_oracle(trace_id: str, domain: str, trace_results: dict) -> dict | None:
     """Pick whichever action succeeded. If multiple succeeded, pick lowest cost. If none, pick ESCALATE."""
     successes = [r for r in trace_results.values() if r.get("success")]
@@ -222,6 +246,10 @@ def evaluate_policy(
         "total_tokens": total_tokens,
         "avg_latency_seconds": round(total_latency / n_valid, 3),
         "cost_per_success": round(total_cost / n_success, 6) if n_success else None,
+        # Key practical metric from paper spec: successes per dollar spent.
+        # Note: LOCAL_REPAIR cost is $0 (CausalFlow pre-computed, no API tokens billed here),
+        # so its success_per_dollar is inf — interpret as "free recovery, cost already paid by CausalFlow".
+        "success_per_dollar": round(n_success / total_cost, 4) if total_cost > 0 else None,
     }
 
     # Cost-adjusted utility at each lambda
@@ -273,9 +301,12 @@ def run_analysis(stage: str) -> None:
     raw = load_results(RESULTS_JSONL)
     metadata = load_trace_metadata(DB_PATH)
     modal = compute_domain_modal(metadata)
+    clf_preds = load_clf_predictions(CLF_PREDICTIONS_DIR)
 
     print(f"Loaded {len(raw)} traces from results")
     print(f"Domain modal actions: {modal}")
+
+    print(f"Loaded {len(clf_preds)} classifier predictions from Squad B")
 
     # Collect per-policy picks for every trace
     policy_picks: dict[str, list[dict | None]] = {
@@ -285,6 +316,7 @@ def run_analysis(stage: str) -> None:
         "always_retrieve_more": [],
         "domain_policy": [],
         "trace_triage": [],
+        "trace_triage_clf": [],
         "oracle": [],
     }
 
@@ -299,6 +331,7 @@ def run_analysis(stage: str) -> None:
         policy_picks["always_retrieve_more"].append(policy_always_retrieve_more(trace_id, domain, trace_results))
         policy_picks["domain_policy"].append(policy_domain(trace_id, domain, trace_results, modal))
         policy_picks["trace_triage"].append(policy_trace_triage(trace_id, domain, trace_results, action_label))
+        policy_picks["trace_triage_clf"].append(policy_trace_triage_clf(trace_id, domain, trace_results, clf_preds))
         policy_picks["oracle"].append(policy_oracle(trace_id, domain, trace_results))
 
     policy_metrics = [
@@ -307,7 +340,7 @@ def run_analysis(stage: str) -> None:
     ]
 
     # Print table
-    print(f"\n{'Policy':<24} {'N':>5} {'RecovRate':>10} {'AvgCost':>10} {'Util(λ=1)':>10} {'Util(λ=2)':>10}")
+    print(f"\n{'Policy':<24} {'N':>5} {'RecovRate':>10} {'AvgCost':>10} {'Util(L=1)':>10} {'Util(L=2)':>10}")
     print("-" * 75)
     for m in policy_metrics:
         print(

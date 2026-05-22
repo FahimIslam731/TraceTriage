@@ -16,8 +16,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from .cost_tracker import CostTracker, DOMAIN_MODELS
-from .recovery_actions import (
+from ..cost_tracker import CostTracker, DOMAIN_MODELS
+from ..recovery_actions import (
     FailedTrace,
     run_escalate,
     run_local_repair,
@@ -27,7 +27,7 @@ from .recovery_actions import (
     run_tool_fix,
     run_recovery,
 )
-from .verify import verify_answer
+from ..verify import verify_answer
 
 
 # ---------------------------------------------------------------------------
