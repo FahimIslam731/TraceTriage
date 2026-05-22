@@ -1,7 +1,6 @@
 # Squad A: Human vs. LLM Label Audit Report
 
 **Date:** May 17, 2026  
-**Team:** Kavin, Fahim, Yurun, Daivik, Gerard, Gezheng  
 **Traces audited:** 638  
 **Script:** [`human_vs_llm_audit.py`](./human_vs_llm_audit.py)
 
@@ -42,21 +41,21 @@ Cohen's kappa measures agreement between every pair of annotators:
 
 | Pair | κ |
 |------|---|
-| Kavin vs Fahim | 0.7824 |
-| Kavin vs Yurun | 0.8151 |
-| Kavin vs Daivik | 0.8150 |
-| Kavin vs Gerard | 0.6734 |
-| Kavin vs Gezheng | 0.8490 |
-| Fahim vs Yurun | 0.8062 |
-| Fahim vs Daivik | 0.8063 |
-| Fahim vs Gerard | 0.6322 |
-| Fahim vs Gezheng | 0.8220 |
-| Yurun vs Daivik | 0.7956 |
-| Yurun vs Gerard | 0.6463 |
-| Yurun vs Gezheng | 0.8273 |
-| Daivik vs Gerard | 0.6500 |
-| Daivik vs Gezheng | 0.8771 |
-| Gerard vs Gezheng | 0.6622 |
+| P1 vs P2 | 0.7824 |
+| P1 vs P3 | 0.8151 |
+| P1 vs P4 | 0.8150 |
+| P1 vs P5 | 0.6734 |
+| P1 vs P6 | 0.8490 |
+| P2 vs P3 | 0.8062 |
+| P2 vs P4 | 0.8063 |
+| P2 vs P5 | 0.6322 |
+| P2 vs P6 | 0.8220 |
+| P3 vs P4 | 0.7956 |
+| P3 vs P5 | 0.6463 |
+| P3 vs P6 | 0.8273 |
+| P4 vs P5 | 0.6500 |
+| P4 vs P6 | 0.8771 |
+| P5 vs P6 | 0.6622 |
 | **Mean** | **0.7640** |
 
 Most pairs show substantial-to-almost-perfect agreement (0.63–0.88).
@@ -102,10 +101,10 @@ How many of the 6 annotators agreed on each trace:
 
 | LLM System | Accuracy | Cohen's κ |
 |------------|----------|-----------|
-| GPT (Kavin) | 59.1% | 0.418 |
-| GPT (Fahim) | 57.8% | 0.405 |
-| Llama (Kavin) | 61.0% | 0.422 |
-| Llama (Fahim) | 62.2% | 0.422 |
+| GPT (P1) | 59.1% | 0.418 |
+| GPT (P2) | 57.8% | 0.405 |
+| Llama (P1) | 61.0% | 0.422 |
+| Llama (P2) | 62.2% | 0.422 |
 | **GPT merged** | **59.1%** | **0.418** |
 | **Llama merged** | **62.2%** | **0.437** |
 | **All 4 LLMs merged** | **63.8%** | **0.470** |

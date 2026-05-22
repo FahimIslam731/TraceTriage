@@ -21,8 +21,8 @@ from sklearn.model_selection import train_test_split
 # ---------------------------------------------------------------------------
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = PROJECT_ROOT / "data" / "causal_runs.sqlite"
-GPT_LABELS_PATH = PROJECT_ROOT / "data" / "labeling_exports" / "gpt_auto_labels_kavin.jsonl"
-LLAMA_LABELS_PATH = PROJECT_ROOT / "data" / "labeling_exports" / "llama_auto_labels_kavin.jsonl"
+GPT_LABELS_PATH = PROJECT_ROOT / "data" / "labeling_exports" / "gpt_auto_labels_P1.jsonl"
+LLAMA_LABELS_PATH = PROJECT_ROOT / "data" / "labeling_exports" / "llama_auto_labels_P1.jsonl"
 FAILED_TRACES_PATH = PROJECT_ROOT / "data" / "labeling_exports" / "failed_traces.jsonl"
 SQUAD_A_DIR = PROJECT_ROOT / "squad_a"
 FROZEN_SPLIT_PATHS = {

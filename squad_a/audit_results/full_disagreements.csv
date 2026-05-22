@@ -1,4 +1,4 @@
-trace_num,human_majority,human_agreement,human_Kavin,human_Fahim,human_Yurun,human_Daivik,human_Gerard,human_Gezheng,GPT (Kavin),GPT (Fahim),Llama (Kavin),Llama (Fahim),gpt_majority,llama_majority,all_llm_majority
+trace_num,human_majority,human_agreement,human_P1,human_P2,human_P3,human_P4,human_P5,human_P6,GPT (P1),GPT (P2),Llama (P1),Llama (P2),gpt_majority,llama_majority,all_llm_majority
 6,RETRY,0.67,REPLAN,RETRY,RETRY,RETRY,REPLAN,RETRY,REPLAN,REPLAN,REPLAN,REPLAN,REPLAN,REPLAN,REPLAN
 11,LOCAL_REPAIR,0.83,LOCAL_REPAIR,LOCAL_REPAIR,LOCAL_REPAIR,LOCAL_REPAIR,REPLAN,LOCAL_REPAIR,REPLAN,REPLAN,RETRY,RETRY,REPLAN,RETRY,REPLAN
 20,LOCAL_REPAIR,0.50,LOCAL_REPAIR,RETRY,LOCAL_REPAIR,RETRY,LOCAL_REPAIR,RETRY,RETRY,RETRY,RETRY,RETRY,RETRY,RETRY,RETRY

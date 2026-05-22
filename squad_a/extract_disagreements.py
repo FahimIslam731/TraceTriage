@@ -15,10 +15,10 @@ def main():
         human_majority = row["human_majority"]
         # The 4 LLM columns
         llm_preds = [
-            row["GPT (Kavin)"],
-            row["GPT (Fahim)"],
-            row["Llama (Kavin)"],
-            row["Llama (Fahim)"]
+            row["GPT (P1)"],
+            row["GPT (P2)"],
+            row["Llama (P1)"],
+            row["Llama (P2)"]
         ]
         
         # If all 4 disagreed with the human majority

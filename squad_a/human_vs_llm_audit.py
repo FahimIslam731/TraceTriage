@@ -30,18 +30,18 @@ CSV_PATH = PROJECT_ROOT / "squad_a" / "Trace Triage Failed Traces Human_LLM Audi
 OUTPUT_DIR = PROJECT_ROOT / "squad_a" / "audit_results"
 
 # Column mappings from the CSV
-HUMAN_COLS = ["Kavin", "Fahim", "Yurun", "Daivik", "Gerard", "Gezheng"]
+HUMAN_COLS = ["P1", "P2", "P3", "P4", "P5", "P6"]
 LLM_COLS = [
-    "AI output (Kavin's OpenAI)",
-    "AI output (Fahim's OpenAI)",
-    "AI output (Kavin's Llama)",
-    "AI output (Fahim's Llama)",
+    "AI output (P1's OpenAI)",
+    "AI output (P2's OpenAI)",
+    "AI output (P3's Llama)",
+    "AI output (P4's Llama)",
 ]
 LLM_SHORT_NAMES = {
-    "AI output (Kavin's OpenAI)": "GPT (Kavin)",
-    "AI output (Fahim's OpenAI)": "GPT (Fahim)",
-    "AI output (Kavin's Llama)": "Llama (Kavin)",
-    "AI output (Fahim's Llama)": "Llama (Fahim)",
+    "AI output (P1's OpenAI)": "GPT (P1)",
+    "AI output (P2's OpenAI)": "GPT (P2)",
+    "AI output (P1's Llama)": "Llama (P1)",
+    "AI output (P2's Llama)": "Llama (P2)",
 }
 
 VALID_LABELS = {"RETRY", "REPLAN", "RETRIEVE_MORE", "TOOL_FIX", "ESCALATE", "LOCAL_REPAIR"}
@@ -274,8 +274,8 @@ def main():
     print("=" * 70)
 
     for group_name, group_cols in [
-        ("GPT (merged)", ["AI output (Kavin's OpenAI)", "AI output (Fahim's OpenAI)"]),
-        ("Llama (merged)", ["AI output (Kavin's Llama)", "AI output (Fahim's Llama)"]),
+        ("GPT (merged)", ["AI output (P1's OpenAI)", "AI output (P2's OpenAI)"]),
+        ("Llama (merged)", ["AI output (P1's Llama)", "AI output (P2's Llama)"]),
         ("All LLMs (merged)", LLM_COLS),
     ]:
         print(f"\n  {'─' * 60}")
