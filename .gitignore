@@ -21,7 +21,7 @@ Thumbs.db
 .claude/
 
 # Data — large files, never commit
-raw_data/
+data/raw_data/
 data/causal_runs.sqlite
 
 # Results — gitignored, zip and share manually

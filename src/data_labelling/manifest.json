@@ -1,0 +1,49 @@
+{
+  "schema_version": "1.0",
+  "seed": 42,
+  "source_file": "squad_a/audit_results/all_1212_labels.csv",
+  "source_sha256": "532bfb008c78b20e960f8a3820748ac9aa52a011ba969bf1c961487c0bf0e736",
+  "total_rows": 1212,
+  "splits": {
+    "train": {
+      "file": "train.csv",
+      "sha256": "79a00062c17625ec329807c516159dddecf470cd84c359355e4bd80fbe9909e7",
+      "rows": 968,
+      "pct": 79.87,
+      "label_counts": {
+        "LOCAL_REPAIR": 469,
+        "REPLAN": 219,
+        "RETRIEVE_MORE": 162,
+        "TOOL_FIX": 96,
+        "RETRY": 21,
+        "ESCALATE": 1
+      }
+    },
+    "dev": {
+      "file": "dev.csv",
+      "sha256": "51cf88081d63cc4136b9b736a9daca778b76fd818f47da4f8c1bf96485d8f1b8",
+      "rows": 122,
+      "pct": 10.07,
+      "label_counts": {
+        "LOCAL_REPAIR": 59,
+        "REPLAN": 28,
+        "RETRIEVE_MORE": 20,
+        "TOOL_FIX": 12,
+        "RETRY": 3
+      }
+    },
+    "test": {
+      "file": "test.csv",
+      "sha256": "cfcdbccefba9f6000e1db7648f2cbd13b131fa267764ba7b30b0854b2b7efb88",
+      "rows": 122,
+      "pct": 10.07,
+      "label_counts": {
+        "LOCAL_REPAIR": 59,
+        "REPLAN": 28,
+        "RETRIEVE_MORE": 20,
+        "TOOL_FIX": 12,
+        "RETRY": 3
+      }
+    }
+  }
+}
