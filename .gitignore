@@ -25,12 +25,6 @@ data/raw_data/
 data/causal_runs.sqlite
 
 # Results — gitignored, zip and share manually
-squad_b/results/
-squad_b/cache/
-squad_c/results/
-
-# Word docs (use the shared drive copy)
-*.docx
-
-# Working notes
-traces_to_label.txt
+classification/results/
+classification/cache/
+recovery_simulation/results/
