@@ -195,3 +195,5 @@ Coverage: 1,204 traces (250 GSM8K, 472 MBPP, 336 MedBrowseComp, 146 SealQA).
 | `trace_triage` | Human majority-vote label per trace (upper bound) |
 | `trace_triage_clf` | Squad B best classifier prediction per trace (practical) |
 | `oracle` | Whichever action actually succeeded at lowest cost |
+
+
