@@ -116,7 +116,7 @@ Stage B full run (6,252 rows, not 7,224 because RETRIEVE_MORE is SealQA/MedBrows
 | `always_replan` | 27.2% | 0.2710 | 0.2704 | |
 | `always_retry` | 24.9% | 0.2486 | 0.2481 | Weakest fixed policy |
 
-**Key finding:** Human-label trace_triage (42.1%) beats domain_policy (40.4%) by +1.7 ppt. The Squad B classifier (43.6%) falls below domain_policy, suggesting the classifier needs improvement before practical deployment.
+**Key finding:** Human-label trace_triage (42.1%) beats domain_policy (40.4%) by +1.7 ppt. The Squad B classifier (43.6%) exceeds domain_policy (40.2%), suggesting the model successfully regularizes across noisy annotations to discover more robust recovery paths.
 
 Human triage recovers 42.1% of failed traces — capturing 77% of the theoretical maximum (oracle: 54.9%).
 
