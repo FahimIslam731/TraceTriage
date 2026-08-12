@@ -196,4 +196,11 @@ Coverage: 1,204 traces (250 GSM8K, 472 MBPP, 336 MedBrowseComp, 146 SealQA).
 | `trace_triage_clf` | Squad B best classifier prediction per trace (practical) |
 | `oracle` | Whichever action actually succeeded at lowest cost |
 
+---
+
+### Dataset & Audit Records
+The full corpus and human audit records are structured under `src/data_labelling/`:
+- `AUDIT_REPORT.md`: Contains the six-annotator agreement analysis, including the full pairwise Cohen's $\kappa$ table (mean $\kappa = 0.764$).
+- `human_vs_llm_audit.py`: The validation and audit script.
+- `all_1212_labels.csv`: The complete set of 1,212 majority-vote labels across all domains.
 
