@@ -13,7 +13,7 @@ Outputs
 squad_c/results/policy_comparison.json   — per-policy metrics table
 squad_c/results/decision_gate.json       — Stage A gate result (pass/fail + margin)
 
-7 Policies (from paper Experiment 4)
+8 Policies (from paper Experiment 4)
 -------------------------------------
 always_retry          — apply RETRY to every failure
 always_local_repair   — apply LOCAL_REPAIR to every failure
@@ -231,6 +231,10 @@ def evaluate_policy(
     total_cost = sum(r.get("cost_usd", 0.0) for r in valid)
     total_tokens = sum(r.get("total_tokens", 0) for r in valid)
     total_latency = sum(r.get("latency_seconds", 0.0) for r in valid)
+    total_serper_queries = sum(
+        int((r.get("metadata") or {}).get("serper_query_count", 0))
+        for r in valid
+    )
 
     success_rate = n_success / n_valid
     avg_cost = total_cost / n_valid
@@ -244,6 +248,7 @@ def evaluate_policy(
         "total_cost_usd": round(total_cost, 6),
         "avg_cost_per_trace": round(avg_cost, 8),
         "total_tokens": total_tokens,
+        "total_serper_queries": total_serper_queries,
         "avg_latency_seconds": round(total_latency / n_valid, 3),
         "cost_per_success": round(total_cost / n_success, 6) if n_success else None,
         # Key practical metric from paper spec: successes per dollar spent.

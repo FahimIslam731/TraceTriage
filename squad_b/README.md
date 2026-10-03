@@ -52,10 +52,22 @@ squad_b/
 - Trains **Logistic Regression** and **Random Forest** (both class-weight balanced)
 - Also reports **majority** and **domain-only** baselines for reference
 - Saves per-domain metrics and per-domain confusion matrices in result JSON
+- The TF-IDF + Random Forest router is intentionally lightweight: it matches or outperforms the tested LLM routers while avoiding an LLM call at routing time.
 
 ### `ablations.py`
 - Runs the required input-variant ablations over TF-IDF classifiers
 - Saves one result file per variant plus `results/input_ablation_summary_results.json`
+- Useful interpretation: final-answer-only collapses, while verifier feedback, causal-step neighborhoods, and full trace text carry most of the routing signal. This supports the claim that the classifier uses trace/failure evidence rather than just the final wrong answer.
+
+Representative no-structured ablation results:
+
+| Input variant | LogReg Macro F1 | RF Macro F1 | Best Macro F1 | Domain-only Macro F1 |
+|---|---:|---:|---:|---:|
+| Full trace | 0.497 | 0.500 | 0.500 | 0.292 |
+| Final answer only | 0.130 | 0.118 | 0.130 | 0.292 |
+| Verifier feedback only | 0.466 | 0.380 | 0.466 | 0.292 |
+| Trace stats only | 0.314 | 0.384 | 0.384 | 0.292 |
+| Causal-step neighborhood | 0.484 | 0.391 | 0.484 | 0.292 |
 
 ### `cross_domain.py`
 - Runs Experiment 3 leave-one-domain-out evaluation

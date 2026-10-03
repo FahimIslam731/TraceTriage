@@ -39,6 +39,7 @@ _MAX_ANSWER_CHARS = 600
 _SERPER_URL = "https://google.serper.dev/search"
 _SERPER_MAX_QUERIES = 5       # matches paper: "5 extra search/open/extract steps"
 _SERPER_RESULTS_PER_QUERY = 5 # snippets per search
+_SERPER_QUERY_PRICE_USD = float(os.environ.get("SERPER_QUERY_PRICE_USD", "0.0"))
 
 # MBPP docker helpers — cache loaded once per process
 _MBPP_TESTS_CACHE: dict[int, str] = {}
@@ -271,8 +272,7 @@ def _serper_search(queries: list[str], api_key: str) -> list[dict]:
             for item in data.get("organic", [])[:_SERPER_RESULTS_PER_QUERY]
             if item.get("title") or item.get("snippet")
         ]
-        if results:
-            output.append({"query": query, "results": results})
+        output.append({"query": query, "results": results})
     return output
 
 
@@ -325,8 +325,13 @@ def _build_result_and_record(
     tracker: CostTracker,
     error: Optional[str] = None,
     metadata: dict | None = None,
+    external_cost_usd: float = 0.0,
 ) -> RecoveryResult:
-    cost = tracker.compute_cost(model, input_tokens, output_tokens)
+    model_cost = tracker.compute_cost(model, input_tokens, output_tokens)
+    cost = model_cost + external_cost_usd
+    metadata = metadata or {}
+    if external_cost_usd:
+        metadata = {**metadata, "external_cost_usd": round(external_cost_usd, 8)}
     success = (
         error is None
         and verify_answer(trace.domain, trace.gold_answer, recovered_answer)
@@ -342,7 +347,7 @@ def _build_result_and_record(
         latency_seconds=round(latency, 3),
         success=success,
         error=error,
-        metadata=metadata or {},
+        metadata=metadata,
     )
     tracker.record(rec)
     return RecoveryResult(
@@ -357,7 +362,7 @@ def _build_result_and_record(
         latency_seconds=round(latency, 3),
         model_used=model,
         error=error,
-        metadata=metadata or {},
+        metadata=metadata,
     )
 
 
@@ -473,8 +478,10 @@ def _run_local_repair_with_search(
         serper_key = os.environ.get("SERPER_API_KEY", "")
 
         evidence_parts = []
+        serper_query_count = 0
         if serper_key and query:
             search_results = _serper_search([query], serper_key)
+            serper_query_count = len(search_results)
             for sr in search_results:
                 for item in sr["results"]:
                     evidence_parts.append(f"- {item['title']}: {item['snippet']}")
@@ -494,7 +501,13 @@ def _run_local_repair_with_search(
         latency = time.perf_counter() - t0
         return _build_result_and_record(
             trace, "LOCAL_REPAIR", model, answer, in_tok, out_tok, latency, tracker,
-            metadata={"repair_query": query, "serper_used": bool(serper_key)},
+            metadata={
+                "repair_query": query,
+                "serper_used": bool(serper_key),
+                "serper_query_count": serper_query_count,
+                "serper_query_price_usd": _SERPER_QUERY_PRICE_USD,
+            },
+            external_cost_usd=serper_query_count * _SERPER_QUERY_PRICE_USD,
         )
     except Exception as exc:
         latency = time.perf_counter() - t0
@@ -620,7 +633,13 @@ def run_retrieve_more(trace: FailedTrace, client: OpenAI, tracker: CostTracker) 
         latency = time.perf_counter() - t0
         return _build_result_and_record(
             trace, "RETRIEVE_MORE", model, answer, in_tok, out_tok, latency, tracker,
-            metadata={"serper_used": bool(serper_key), "queries_run": queries_run},
+            metadata={
+                "serper_used": bool(serper_key),
+                "queries_run": queries_run,
+                "serper_query_count": len(queries_run),
+                "serper_query_price_usd": _SERPER_QUERY_PRICE_USD,
+            },
+            external_cost_usd=len(queries_run) * _SERPER_QUERY_PRICE_USD,
         )
     except Exception as exc:
         latency = time.perf_counter() - t0

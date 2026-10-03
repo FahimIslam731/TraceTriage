@@ -21,6 +21,8 @@
 
 > `gpt-5-chat` has an asymmetric output rate ($10/M) — expensive despite fewest total tokens because MBPP solutions are verbose.
 
+Model-token cost is tracked in `cost_usd`. Serper web-search usage is tracked separately as query counts unless `SERPER_QUERY_PRICE_USD` is set before running recovery; when that variable is set, query charges are added into each recovery record's `cost_usd`.
+
 ## Stage A: Pilot (100 traces per domain, all 146 SealQA)
 
 ### Actuals by Action

@@ -44,6 +44,9 @@ Keys in `.env` at the project root:
 ```
 OPENROUTER_API_KEY=...
 SERPER_API_KEY=...
+# Optional: include paid Serper search charges in cost_usd.
+# Leave unset/0.0 if using the free tier and reporting query counts separately.
+SERPER_QUERY_PRICE_USD=0.0
 ```
 
 ### Step 1 — Sanity check (no API key needed)
@@ -148,6 +151,8 @@ One JSON record per `(trace, action)` pair — 6,252 rows total.
 - **ESCALATE** — always null (1,204/1,204). No model call is made; the trace is marked unrecoverable by definition.
 - **LOCAL_REPAIR** — null for 768/1,204 traces. These are traces where no `repaired_text` was available in SQLite (either `is_local_repairable = 0`). Nothing to return, so `success = False` and `recovered_answer = null`.
 - **RETRY / REPLAN / RETRIEVE_MORE / TOOL_FIX** — null only on API crashes (1–2 rows each).
+
+For web-search actions, `metadata.serper_query_count` records the number of Serper queries issued. If `SERPER_QUERY_PRICE_USD` is set, those search charges are added into `cost_usd`; otherwise `cost_usd` contains model-token costs and query usage is reported separately.
 
 ---
 

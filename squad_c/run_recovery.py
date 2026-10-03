@@ -3,7 +3,7 @@
 Usage (pilot, 100 traces per domain):
     python -m squad_c.run_recovery --pilot
 
-Usage (full run, all 1299 traces):
+Usage (full run, all available non-ablation failed traces; 1,204 in the paper run):
     python -m squad_c.run_recovery --full
 
 Usage (single action on a specific trace for testing):
@@ -18,6 +18,8 @@ squad_c/results/summary.json            — aggregate stats after run completes
 Environment
 -----------
 OPENROUTER_API_KEY   required for any action that calls a model
+SERPER_API_KEY       required for RETRIEVE_MORE web search
+SERPER_QUERY_PRICE_USD optional; adds paid search-query cost into cost_usd
 """
 import argparse
 import json
@@ -27,10 +29,15 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
-from dotenv import load_dotenv
 from openai import OpenAI
 
-load_dotenv()  # loads OPENROUTER_API_KEY and SERPER_API_KEY from .env
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    load_dotenv = None
+
+if load_dotenv is not None:
+    load_dotenv()  # loads OPENROUTER_API_KEY and SERPER_API_KEY from .env
 
 from .cost_tracker import CostTracker
 from .recovery_actions import FailedTrace, RecoveryResult, run_recovery
@@ -206,7 +213,13 @@ def run_simulation(
 def compute_summary(results: list[RecoveryResult], tracker: CostTracker) -> dict:
     from collections import defaultdict
 
-    by_action: dict[str, dict] = defaultdict(lambda: {"calls": 0, "successes": 0, "cost": 0.0, "tokens": 0})
+    by_action: dict[str, dict] = defaultdict(lambda: {
+        "calls": 0,
+        "successes": 0,
+        "cost": 0.0,
+        "tokens": 0,
+        "serper_queries": 0,
+    })
     by_domain: dict[str, dict] = defaultdict(lambda: {"calls": 0, "successes": 0, "cost": 0.0})
 
     for r in results:
@@ -215,6 +228,7 @@ def compute_summary(results: list[RecoveryResult], tracker: CostTracker) -> dict
         ba["successes"] += int(r.success)
         ba["cost"] += r.cost_usd
         ba["tokens"] += r.total_tokens
+        ba["serper_queries"] += int(r.metadata.get("serper_query_count", 0))
 
         bd = by_domain[r.action + "::" + (r.metadata.get("domain", ""))]
         bd["calls"] += 1
@@ -227,6 +241,7 @@ def compute_summary(results: list[RecoveryResult], tracker: CostTracker) -> dict
             "recovery_rate": round(d["successes"] / d["calls"], 4) if d["calls"] else 0,
             "total_cost_usd": round(d["cost"], 6),
             "total_tokens": d["tokens"],
+            "total_serper_queries": d["serper_queries"],
             "cost_per_success": (
                 round(d["cost"] / d["successes"], 6) if d["successes"] else None
             ),
