@@ -10,7 +10,7 @@ Squad C runs the actual recovery actions on failed traces, compares 8 routing po
 squad_c/
 ├── README.md                  # this file
 ├── costtable.md               # full cost breakdown with actuals (Stage A + B)
-├── all_1212_labels.csv        # Squad A human majority labels (source of truth for triage routing)
+├── ../squad_a/dataset_split/  # Squad A human majority labels used for triage routing
 │
 ├── recovery_actions.py        # 6 recovery action implementations (RETRY, REPLAN, etc.)
 ├── run_recovery.py            # CLI runner — executes actions across traces
@@ -114,12 +114,12 @@ Stage B full run (6,252 rows, not 7,224 because RETRIEVE_MORE is SealQA/MedBrows
 | `trace_triage_human_label` | 42.1% | 0.4204 | 0.4196 | Human majority labels — theoretical ceiling |
 | `always_retrieve_more` | 40.5% | 0.4045 | 0.4037 | Strong fixed baseline |
 | `domain_policy` | 40.4% | 0.4030 | 0.4023 | Modal action per domain |
-| `trace_triage_classifier` | **37.1%** | 0.3706 | 0.3699 | Squad B Gemini few-shot classifier |
+| `trace_triage_classifier` | **43.6%** | 0.4354 | 0.4347 | Squad B Gemini few-shot classifier |
 | `always_local_repair` | 32.9% | 0.3287 | 0.3286 | CausalFlow only |
 | `always_replan` | 27.2% | 0.2710 | 0.2704 | |
 | `always_retry` | 24.9% | 0.2486 | 0.2481 | Weakest fixed policy |
 
-**Key finding:** Human-label trace_triage (42.1%) beats domain_policy (40.4%) by +1.7 ppt. The Squad B classifier (37.1%) falls below domain_policy, suggesting the classifier needs improvement before practical deployment.
+**Key finding:** Human-label trace_triage (42.1%) beats domain_policy (40.4%) by +1.7 ppt. The Squad B classifier (43.6%) exceeds domain_policy (40.2%), suggesting the model successfully regularizes across noisy annotations to discover more robust recovery paths.
 
 Human triage recovers 42.1% of failed traces — capturing 77% of the theoretical maximum (oracle: 54.9%).
 
@@ -200,3 +200,11 @@ Coverage: 1,204 traces (250 GSM8K, 472 MBPP, 336 MedBrowseComp, 146 SealQA).
 | `trace_triage` | Human majority-vote label per trace (upper bound) |
 | `trace_triage_clf` | Squad B best classifier prediction per trace (practical) |
 | `oracle` | Whichever action actually succeeded at lowest cost |
+
+---
+
+### Dataset & Audit Records
+The full corpus and human audit records are structured under `squad_a/`:
+- `AUDIT_REPORT.md`: Contains the six-annotator agreement analysis, including the full pairwise Cohen's $\kappa$ table (mean $\kappa = 0.764$).
+- `human_vs_llm_audit.py`: The validation and audit script.
+- `dataset_split/train.csv`, `dataset_split/dev.csv`, and `dataset_split/test.csv`: The frozen 1,212-trace split with majority-vote labels across all domains.

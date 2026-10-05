@@ -109,7 +109,7 @@ def split_label_group(
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--input",      default="squad_a/audit_results/all_1212_labels.csv")
-    parser.add_argument("--output-dir", default="squad_a")
+    parser.add_argument("--output-dir", default="squad_a/dataset_split")
     parser.add_argument("--seed",       type=int, default=DEFAULT_SEED)
     args = parser.parse_args(argv)
 

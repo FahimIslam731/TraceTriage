@@ -21,11 +21,16 @@ from sklearn.model_selection import train_test_split
 # ---------------------------------------------------------------------------
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = PROJECT_ROOT / "data" / "causal_runs.sqlite"
-GPT_LABELS_PATH = PROJECT_ROOT / "data" / "labeling_exports" / "gpt_auto_labels_P1.jsonl"
-LLAMA_LABELS_PATH = PROJECT_ROOT / "data" / "labeling_exports" / "llama_auto_labels_P1.jsonl"
+GPT_LABELS_PATH = PROJECT_ROOT / "data" / "labeling_exports" / "gpt_auto_labels_V2.jsonl"
+LLAMA_LABELS_PATH = PROJECT_ROOT / "data" / "labeling_exports" / "llama_auto_labels_V2.jsonl"
 FAILED_TRACES_PATH = PROJECT_ROOT / "data" / "labeling_exports" / "failed_traces.jsonl"
 SQUAD_A_DIR = PROJECT_ROOT / "squad_a"
 FROZEN_SPLIT_PATHS = {
+    "train": SQUAD_A_DIR / "dataset_split" / "train.csv",
+    "dev": SQUAD_A_DIR / "dataset_split" / "dev.csv",
+    "test": SQUAD_A_DIR / "dataset_split" / "test.csv",
+}
+LEGACY_FROZEN_SPLIT_PATHS = {
     "train": SQUAD_A_DIR / "train.csv",
     "dev": SQUAD_A_DIR / "dev.csv",
     "test": SQUAD_A_DIR / "test.csv",
@@ -76,6 +81,8 @@ def load_frozen_split_labels() -> dict[str, dict[str, str]]:
     """
     split_labels = {}
     for split, path in FROZEN_SPLIT_PATHS.items():
+        if not path.exists():
+            path = LEGACY_FROZEN_SPLIT_PATHS[split]
         if not path.exists():
             return {}
         with path.open(newline="", encoding="utf-8") as f:

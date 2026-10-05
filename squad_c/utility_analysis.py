@@ -8,7 +8,7 @@ Computes:
   5. Action sensitivity — robustness when action costs are scaled up/down
 
 Run:
-    python -m squad_c.experiment5
+    python -m squad_c.utility_analysis
 
 Outputs to squad_c/results/:
     experiment5.json         — all computed data
@@ -31,6 +31,7 @@ import matplotlib.patches as mpatches
 RESULTS_DIR = Path("squad_c/results")
 RESULTS_JSONL = RESULTS_DIR / "recovery_results.jsonl"
 LABELS_CSV = Path("squad_a/audit_results/all_1212_labels.csv")
+SPLIT_DIR = Path("squad_a/dataset_split")
 CLF_DIR = RESULTS_DIR / "squad_b_best_classifier" / "Gemini"
 DB_PATH = Path("data/causal_runs.sqlite")
 OUT_JSON = RESULTS_DIR / "experiment5.json"
@@ -51,6 +52,28 @@ ACTION_SCALE_FACTORS = [0.5, 1.0, 2.0, 5.0]  # cost multipliers for sensitivity 
 # Data loading
 # ---------------------------------------------------------------------------
 
+def load_squad_a_labels():
+    """Load human majority-vote labels from Squad A's label table or frozen splits."""
+    if LABELS_CSV.exists():
+        with open(LABELS_CSV, encoding="utf-8") as f:
+            return {row["trace_id"]: row["human_majority"] for row in csv.DictReader(f)}
+
+    labels = {}
+    for split in ("train", "dev", "test"):
+        path = SPLIT_DIR / f"{split}.csv"
+        if not path.exists():
+            continue
+        with path.open(encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                labels[row["trace_id"]] = row["human_majority"]
+    if labels:
+        return labels
+
+    raise FileNotFoundError(
+        f"Squad A labels not found at {LABELS_CSV} or under {SPLIT_DIR}"
+    )
+
+
 def load_data():
     # Recovery results
     results = defaultdict(dict)
@@ -63,8 +86,7 @@ def load_data():
             }
 
     # Squad A labels
-    with open(LABELS_CSV, encoding="utf-8") as f:
-        squad_a = {row["trace_id"]: row["human_majority"] for row in csv.DictReader(f)}
+    squad_a = load_squad_a_labels()
 
     # Classifier predictions
     clf = {}

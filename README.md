@@ -1,17 +1,19 @@
 # TraceTriage
 
-TraceTriage is a research codebase for studying post-hoc recovery-action routing for failed LLM-agent executions. The repository contains the labeling/audit pipeline, classification baselines, and offline recovery simulation used by the paper.
+**TraceTriage** is a research codebase for studying recovery-action routing for failed LLM-agent executions. Given a failed trace, it classifies the failure into a recovery action (`RETRY`, `REPLAN`, `RETRIEVE_MORE`, `TOOL_FIX`, `LOCAL_REPAIR`, or `ESCALATE`) and evaluates whether that action recovers the correct answer.
 
 ## Repository Map
 
 | Path | Purpose |
 |---|---|
-| `squad_a/` | Human/LLM label audit, frozen train/dev/test splits, and consolidated labels. |
+| `squad_a/` | Human/LLM label audit, frozen train/dev/test splits, and label provenance. |
 | `squad_b/` | Recovery-action classifiers: TF-IDF, embeddings, LLM baselines, input ablations. |
 | `squad_c/` | Offline recovery-action simulation, policy comparison, and cost tracking. |
-| `data/` | Local generated data exports. The SQLite database is gitignored because it is large. |
+| `data/` | Generated data exports. The SQLite database is gitignored because it is large. |
 | `build_sqlite.py` | Rebuilds the local SQLite trace database from source artifacts. |
 | `auto_label.ipynb` | LLM-assisted labeling notebook used during dataset construction. |
+
+Each squad directory has its own README with more specific setup and run instructions.
 
 ## Dataset and Label Provenance
 
@@ -20,19 +22,18 @@ There are two important counts:
 - **1,212 total labeled traces**: the full released label set used for Squad B classification and Squad C policy analysis.
 - **638 human-audited traces**: the subset labeled by six human annotators and used to validate the label taxonomy and automated label pipeline.
 
-The human audit found strong agreement: mean pairwise Cohen's kappa is **0.764**. The full train/dev/test split uses `human_majority` labels from Squad A files:
+The 1,212 and 638 counts are not in conflict: the 638 traces are the manually audited subset of the larger labeled corpus. The human audit found strong agreement, with mean pairwise Cohen's kappa of **0.764**.
 
-- `squad_a/train.csv`
-- `squad_a/dev.csv`
-- `squad_a/test.csv`
+Key Squad A artifacts:
 
-Additional audit artifacts:
-
-- `squad_a/AUDIT_REPORT.md`: summary of six-annotator agreement and LLM-vs-human analysis.
-- `squad_a/human_vs_llm_audit.py`: script that reproduces the human-vs-LLM audit tables.
-- `squad_a/audit_results/all_1212_labels.csv`: full 1,212-trace label table.
-- `squad_a/audit_results/consolidated_labels.csv`: 638 human-audited traces with annotator/LLM agreement details.
-- `squad_a/audit_results/full_disagreements.csv`: traces where all LLM pre-labelers disagreed with the human majority.
+| File | Description |
+|---|---|
+| [`squad_a/AUDIT_REPORT.md`](squad_a/AUDIT_REPORT.md) | Six-annotator agreement analysis and LLM-vs-human audit summary. |
+| [`squad_a/human_vs_llm_audit.py`](squad_a/human_vs_llm_audit.py) | Script that reproduces the human-vs-LLM audit tables. |
+| [`squad_a/dataset_split/train.csv`](squad_a/dataset_split/train.csv) | Frozen training split with `trace_id` and `human_majority`. |
+| [`squad_a/dataset_split/dev.csv`](squad_a/dataset_split/dev.csv) | Frozen development split with `trace_id` and `human_majority`. |
+| [`squad_a/dataset_split/test.csv`](squad_a/dataset_split/test.csv) | Frozen test split with `trace_id` and `human_majority`. |
+| [`data/labeling_exports/`](data/labeling_exports/) | Raw LLM auto-label JSONL inputs used during labeling. |
 
 `LOCAL_REPAIR` labels are tied to CausalFlow-validated single-step repairs. CausalFlow supplies validated local repair evidence; TraceTriage uses that evidence as one routed recovery action, rather than replacing recovery mechanisms themselves.
 

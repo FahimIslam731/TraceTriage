@@ -20,7 +20,7 @@ always_local_repair   — apply LOCAL_REPAIR to every failure
 always_replan         — apply REPLAN to every failure
 always_retrieve_more  — RETRIEVE_MORE where applicable, LOCAL_REPAIR fallback
 domain_policy         — modal action per domain (computed from Squad A labels)
-trace_triage          — action from Squad A human_majority labels (all_1212_labels.csv)
+trace_triage          — action from Squad A human_majority labels
 oracle                — whichever action actually succeeded (upper bound)
 """
 import csv
@@ -31,7 +31,8 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 DB_PATH = Path("data/causal_runs.sqlite")
-LABELS_CSV = Path("squad_a/audit_results/all_1212_labels.csv")   # Squad A's human majority labels
+LABELS_CSV = Path("squad_a/audit_results/all_1212_labels.csv")   # Legacy Squad A label table
+SPLIT_DIR = Path("squad_a/dataset_split")
 RESULTS_DIR = Path("squad_c/results")
 RESULTS_JSONL = RESULTS_DIR / "recovery_results.jsonl"
 POLICY_JSON = RESULTS_DIR / "policy_comparison.json"
@@ -45,7 +46,7 @@ GATE_METRIC = "utility_lambda_1_0"  # which utility column to use for the gate (
 # Cost-adjusted utility lambdas to sweep (paper: "vary lambda")
 LAMBDAS = [0.0, 0.5, 1.0, 2.0, 5.0]
 
-# Fallback domain modal actions — verified from all_1212_labels.csv
+# Fallback domain modal actions — verified from Squad A human_majority labels
 # SealQA: REPLAN (56) edges out RETRIEVE_MORE (55) by 1 trace
 DOMAIN_MODAL_FALLBACK: dict[str, str] = {
     "GSM8K":        "LOCAL_REPAIR",
@@ -94,17 +95,32 @@ def load_clf_predictions(pred_dir: Path) -> dict[str, str]:
 
 
 def load_squad_a_labels(csv_path: Path) -> dict[str, str]:
-    """Load human majority-vote labels from Squad A's all_1212_labels.csv."""
-    if not csv_path.exists():
-        sys.exit(f"Squad A labels not found: {csv_path}")
-    with open(csv_path, encoding="utf-8") as f:
-        return {row["trace_id"]: row["human_majority"] for row in csv.DictReader(f)}
+    """Load human majority-vote labels from Squad A's label table or frozen splits."""
+    if csv_path.exists():
+        with open(csv_path, encoding="utf-8") as f:
+            return {row["trace_id"]: row["human_majority"] for row in csv.DictReader(f)}
+
+    labels: dict[str, str] = {}
+    missing = []
+    for split in ("train", "dev", "test"):
+        path = SPLIT_DIR / f"{split}.csv"
+        if not path.exists():
+            missing.append(str(path))
+            continue
+        with path.open(encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                labels[row["trace_id"]] = row["human_majority"]
+    if labels:
+        return labels
+
+    missing_msg = "\n".join(missing) if missing else str(csv_path)
+    sys.exit(f"Squad A labels not found. Checked:\n{csv_path}\n{missing_msg}")
 
 
 def load_trace_metadata(db_path: Path) -> dict[str, dict]:
     """Load domain and action_label for each trace.
 
-    action_label comes from Squad A's all_1212_labels.csv (human majority-vote).
+    action_label comes from Squad A's human majority-vote labels.
     For traces not in the CSV the label is None (excluded from trace_triage evaluation).
     """
     squad_a_labels = load_squad_a_labels(LABELS_CSV)

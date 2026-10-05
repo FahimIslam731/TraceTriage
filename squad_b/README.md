@@ -37,7 +37,7 @@ squad_b/
 ### `data_loader.py`
 - Loads traces and CausalFlow triage metadata from `data/causal_runs.sqlite`
 - Falls back to `data/labeling_exports/failed_traces.jsonl` if SQLite is unavailable
-- Applies Squad A's frozen splits from `squad_a/train.csv`, `squad_a/dev.csv`, and `squad_a/test.csv`
+- Applies Squad A's frozen splits from `squad_a/dataset_split/train.csv`, `squad_a/dataset_split/dev.csv`, and `squad_a/dataset_split/test.csv`
 - Uses Squad A's `human_majority` column as the gold label for frozen-split experiments
 - Falls back to assigning `LOCAL_REPAIR` from CausalFlow metadata and joining GPT/Llama labels for the remaining actions when frozen splits are unavailable
 - **Text features**: flattens each trace into a structured text block (domain, problem, steps, tool outputs, final answer)
