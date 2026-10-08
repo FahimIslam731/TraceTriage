@@ -7,6 +7,7 @@
 | Path | Purpose |
 |---|---|
 | `squad_a/` | Human/LLM label audit, frozen train/dev/test splits, and label provenance. |
+| `src/data_labelling/` | Reviewer-facing label provenance artifacts: audit report, audit script, and full 1,212-label CSV. |
 | `squad_b/` | Recovery-action classifiers: TF-IDF, embeddings, LLM baselines, input ablations. |
 | `squad_c/` | Offline recovery-action simulation, policy comparison, and cost tracking. |
 | `data/` | Generated data exports. The SQLite database is gitignored because it is large. |
@@ -28,8 +29,12 @@ Key Squad A artifacts:
 
 | File | Description |
 |---|---|
+| [`src/data_labelling/AUDIT_REPORT.md`](src/data_labelling/AUDIT_REPORT.md) | Reviewer-facing copy of the six-annotator agreement analysis and human-vs-LLM audit summary. |
+| [`src/data_labelling/human_vs_llm_audit.py`](src/data_labelling/human_vs_llm_audit.py) | Reviewer-facing wrapper for the audit script that computes the human-vs-LLM agreement metrics. |
+| [`src/data_labelling/all_1212_labels.csv`](src/data_labelling/all_1212_labels.csv) | Full 1,212-trace majority-vote label table. |
 | [`squad_a/AUDIT_REPORT.md`](squad_a/AUDIT_REPORT.md) | Six-annotator agreement analysis and LLM-vs-human audit summary. |
 | [`squad_a/human_vs_llm_audit.py`](squad_a/human_vs_llm_audit.py) | Script that reproduces the human-vs-LLM audit tables. |
+| [`squad_a/audit_results/all_1212_labels.csv`](squad_a/audit_results/all_1212_labels.csv) | Full 1,212-trace majority-vote label table used to generate the frozen split files. |
 | [`squad_a/dataset_split/train.csv`](squad_a/dataset_split/train.csv) | Frozen training split with `trace_id` and `human_majority`. |
 | [`squad_a/dataset_split/dev.csv`](squad_a/dataset_split/dev.csv) | Frozen development split with `trace_id` and `human_majority`. |
 | [`squad_a/dataset_split/test.csv`](squad_a/dataset_split/test.csv) | Frozen test split with `trace_id` and `human_majority`. |

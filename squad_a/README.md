@@ -17,6 +17,7 @@ The 638-trace audit is not a separate dataset for Squad B; it is the validation 
 |---|---|
 | `AUDIT_REPORT.md` | Human-vs-LLM label audit summary, including pairwise Cohen's kappa and confusion patterns. |
 | `human_vs_llm_audit.py` | Reproduces the human-vs-LLM audit analysis. |
+| `audit_results/all_1212_labels.csv` | Full 1,212-trace majority-vote label table. |
 | `dataset_split/train.csv`, `dataset_split/dev.csv`, `dataset_split/test.csv` | Frozen splits consumed by Squad B and Squad C. Each row has `trace_id` and `human_majority`. |
 | `manifest.json` | Split metadata, source hash, seed, and class/domain counts. |
 | `stratified_split.py` | Builds frozen splits stratified by domain/action where possible. |
@@ -36,3 +37,11 @@ Labeling was done in two stages. First, LLM pre-labelers produced scalable recov
 - Squad B loads `dataset_split/train.csv`, `dataset_split/dev.csv`, and `dataset_split/test.csv` through `squad_b/data_loader.py`.
 - Squad C combines the frozen split CSVs when evaluating policies such as `trace_triage` and `domain_policy`.
 - `LOCAL_REPAIR` labels are tied to CausalFlow-validated local repairs; the label means a local repair exists and is the routed recovery action for that trace.
+
+## Reviewer-Facing Paths
+
+For paper/rebuttal discoverability, the key label provenance files are also exposed under `src/data_labelling/`:
+
+- `src/data_labelling/AUDIT_REPORT.md`
+- `src/data_labelling/human_vs_llm_audit.py`
+- `src/data_labelling/all_1212_labels.csv`
